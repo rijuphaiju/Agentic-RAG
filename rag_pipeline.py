@@ -23,7 +23,7 @@ import os
 EMBED_MODEL = "all-MiniLM-L6-v2"   # lightweight, fast, good quality
 OLLAMA_MODEL = "llama3.2"           # or "mistral" — run: ollama pull llama3.2
 TOP_K = 10                           # number of passages to retrieve
-MAX_PASSAGES = 90000                 # limit dataset passages for quick testing
+MAX_PASSAGES = 150000                 # limit dataset passages for quick testing
 INDEX_PATH = "faiss_index.bin"
 PASSAGES_PATH = "passages.pkl"
 
@@ -142,15 +142,21 @@ def generate_answer(query, retrieved_passages, model=OLLAMA_MODEL):
         for i, p in enumerate(retrieved_passages)
     ])
 
-    prompt = f"""You are a helpful assistant. Answer the question using ONLY the provided context.
-If the context doesn't contain enough information, say "I don't have enough information."
+    prompt = f"""You are a helpful assistant answering questions based on provided context.
+
+Instructions:
+- Answer directly and concisely based on the context below
+- If the context contains partial information, use it to give the best possible answer
+- Only say you don't know if the context has absolutely no relevant information
+- For yes/no comparison questions, commit to an answer based on what you find
+- Keep answers short — one or two sentences maximum
 
 Context:
 {context}
 
 Question: {query}
 
-Answer:"""
+Answer (be direct and commit to an answer):"""
 
     response = ollama.chat(
         model=model,

@@ -1,0 +1,27 @@
+# Large files - rebuild these
+faiss_index.bin
+passages.pkl
+verifier_model.pt
+verifier_data_bert.pkl
+verifier_data.pkl
+verifier_data_v1.pkl
+tokenizer.pkl
+tokenizer_v1.pkl
+verifier_model_v1.pt
+*.pkl
+*.bin
+*.pt
+
+# Python
+__pycache__/
+*.pyc
+venv/
+venv311/
+.venv/
+
+# Results
+stage1_results.json
+stage4_full_results.json
+verifier_eval_results.json
+verifier_history.json
+verifier_history_v1.json
