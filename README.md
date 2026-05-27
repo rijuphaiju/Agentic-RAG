@@ -1,4 +1,4 @@
-# Agentic RAG — Reducing Hallucinations in LLM Systems
+# HARA — Hallucination-Aware Retrieval Agent
 
 **Purbanchal University | Khwopa Engineering College**
 **Bachelor of Engineering in Computer Engineering — 8th Semester**
