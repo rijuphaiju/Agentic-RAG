@@ -1,7 +1,7 @@
 """
 Stage 1: Basic RAG Pipeline — GPU Accelerated
 ==============================================
-Project: Reducing Hallucinations in Agentic RAG Systems
+Project: HARA — Hallucination-Aware Retrieval Agent
 Dataset: HotpotQA
 LLM: Ollama (local)
 Retrieval: FAISS (CPU index) + sentence-transformers (GPU embeddings)

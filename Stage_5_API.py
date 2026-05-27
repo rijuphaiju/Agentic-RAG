@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     _pipeline.clear()
 
 
-app = FastAPI(title="Agentic RAG API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="HARA — Hallucination-Aware Retrieval Agent API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

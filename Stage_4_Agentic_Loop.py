@@ -1,7 +1,7 @@
 """
 Stage 4: Agentic Decision Loop
 ===============================
-Project: Reducing Hallucinations in Agentic RAG Systems
+Project: HARA — Hallucination-Aware Retrieval Agent
 Proposal Section: 2.6, 6.3.6, 6.3.6.1
 
 Final stage — integrates all previous stages into a self-correcting loop:
@@ -626,7 +626,7 @@ if __name__ == "__main__":
         )
     else:
         # Interactive demo
-        print("=== Stage 4: Agentic RAG Demo ===")
+        print("=== HARA — Stage 4: Agentic Loop Demo ===")
         print(f"Max iterations: {MAX_ITERATIONS} | "
               f"Confidence threshold: {CONFIDENCE_THRESHOLD}")
         print("Type 'eval' to run evaluation, 'quit' to exit.\n")

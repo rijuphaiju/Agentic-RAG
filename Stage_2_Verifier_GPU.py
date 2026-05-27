@@ -1,7 +1,7 @@
 ﻿"""
 Stage 2: Faithfulness Verifier -- DistilBERT Edition (GPU Accelerated)
 =======================================================================
-Project: Reducing Hallucinations in Agentic RAG Systems
+Project: HARA — Hallucination-Aware Retrieval Agent
 
 Key upgrade over custom transformer:
   - DistilBERT encoder replaces custom tokenizer + transformer trained from scratch

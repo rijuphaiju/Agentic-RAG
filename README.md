@@ -1,4 +1,4 @@
-# Agentic RAG — Reducing Hallucinations in LLM Systems
+# HARA — Hallucination-Aware Retrieval Agent
 
 A multi-stage Retrieval-Augmented Generation (RAG) pipeline built on HotpotQA that progressively reduces hallucinations through retrieval quality improvements, faithfulness verification, adaptive query routing, and a self-correcting agentic loop.
 
@@ -235,7 +235,7 @@ Open your browser and go to: **http://localhost:5173**
 ## Project Structure
 
 ```
-Agentic-RAG/
+HARA/
 ├── Stage_1_RAG_Pipeline.py        # FAISS index builder, dense retrieval, answer generation
 ├── Stage_1_RAG_Pipeline_GPU.py    # GPU-optimised variant of Stage 1
 ├── Stage_2_RAG_Pipeline.py        # Stage 1 + faithfulness verification

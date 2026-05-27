@@ -7,7 +7,7 @@ import EvalTable from './components/EvalTable'
 const WELCOME = {
   id: 'welcome',
   role: 'assistant',
-  text: "Hello! I'm the RAG Research Lab assistant. Ask me anything — I'll retrieve relevant passages and give you a verified, grounded answer.",
+  text: "Hello! I'm HARA — the Hallucination-Aware Retrieval Agent. Ask me anything — I'll retrieve relevant passages and give you a verified, grounded answer.",
   metadata: null,
   stage: null,
 }

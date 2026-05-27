@@ -1,7 +1,7 @@
 """
 Stage 2: Faithfulness Verifier — Transformer Trained from Scratch
 =================================================================
-Project: Reducing Hallucinations in Agentic RAG Systems
+Project: HARA — Hallucination-Aware Retrieval Agent
 Proposal Section: 2.2.5, 2.4, 2.8
 
 Architecture:

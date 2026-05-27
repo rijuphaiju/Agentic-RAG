@@ -33,8 +33,8 @@ export default function Sidebar({ view, onViewChange, stage, onStageChange, onCl
       <div style={styles.logo}>
         <span style={styles.logoIcon}>⬡</span>
         <div>
-          <div style={styles.logoTitle}>RAG Research Lab</div>
-          <div style={styles.logoSub}>HotpotQA · llama3.2</div>
+          <div style={styles.logoTitle}>HARA</div>
+          <div style={styles.logoSub}>Hallucination-Aware Retrieval Agent</div>
         </div>
       </div>
 

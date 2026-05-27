@@ -1,7 +1,7 @@
 """
 Stage 3: Adaptive Retrieval
 ===========================
-Project: Reducing Hallucinations in Agentic RAG Systems
+Project: HARA — Hallucination-Aware Retrieval Agent
 Proposal Section: 2.5, 4.3, 6.3.3
 
 Builds on Stage 1 (rag_pipeline.py) and Stage 2 (verifier_gpu.py).
