@@ -47,7 +47,7 @@ from transformers import DistilBertTokenizerFast, DistilBertModel
 # CONFIG
 # 
 DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_SEQ_LEN    = 256
+MAX_SEQ_LEN    = 512   # raised from 256 — inference context can be 1000+ chars; 256 silently truncated it
 NUM_CLASSES    = 3
 BATCH_SIZE     = 32 if DEVICE == "cuda" else 8   # DistilBERT needs more VRAM than custom model
 EPOCHS         = 8
@@ -102,13 +102,20 @@ def build_training_data(num_samples=TRAIN_SAMPLES):
             wrong = random.choice(all_answers)
         data.append({"context": sup_ctx, "answer": wrong, "label": 2})
 
-        # PARTIAL: gold answer but only distractor/partial context
+        # PARTIAL (always): gold answer but only distractor/partial context
         data.append({"context": dist_ctx, "answer": gold, "label": 1})
 
-        # Extra PARTIAL: incomplete answer in supporting context
-        if len(gold.split()) > 1:
-            partial_ans = gold.split()[0]
+        # PARTIAL: incomplete answer in supporting context (always, not only multi-word)
+        # Truncate to first word — represents a real but incomplete answer
+        partial_ans = gold.split()[0]
+        if partial_ans.lower() != gold.lower():   # skip if already single-token
             data.append({"context": sup_ctx, "answer": partial_ans, "label": 1})
+
+        # PARTIAL: synthesised/inferred answer — correct claim phrased differently
+        # Simulates comparison/inference answers that are right but not verbatim in context
+        # e.g. gold="American" → synthesis="Both are American." is grounded but re-phrased
+        synth_ans = f"Both are {gold}." if len(gold.split()) <= 3 else f"The answer is related to {gold.split()[0]}."
+        data.append({"context": sup_ctx, "answer": synth_ans, "label": 1})
 
     random.shuffle(data)
     counts = {0: 0, 1: 0, 2: 0}
@@ -245,7 +252,10 @@ def run_epoch(model, loader, criterion, optimizer=None, scheduler=None,
 
 
 def train(model, train_loader, val_loader):
-    weights   = torch.tensor([1.0, 1.2, 1.5]).to(DEVICE)
+    # PARTIAL gets the highest weight: it's the hardest class (inferred answers)
+    # and the most consequential — a false UNSUPPORTED on a correct PARTIAL answer
+    # causes unnecessary abstention in the agentic loop.
+    weights   = torch.tensor([1.0, 1.8, 1.4]).to(DEVICE)
     criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=LABEL_SMOOTHING)
 
     # Separate LR for BERT body vs classifier head -- standard fine-tuning trick

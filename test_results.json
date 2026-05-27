@@ -1,0 +1,1835 @@
+{
+  "timestamp": "2026-05-26T14:26:27.603022",
+  "total": 196,
+  "time_minutes": 14.4,
+  "summary": {
+    "SUPPORTED": 2,
+    "PARTIAL": 72,
+    "BEST_EFFORT": 122,
+    "ERROR": 0
+  },
+  "by_category": {
+    "SIMPLE QUESTIONS": {
+      "total": 40,
+      "SUPPORTED": 0,
+      "PARTIAL": 15,
+      "BEST_EFFORT": 25,
+      "ERROR": 0
+    },
+    "MULTI-HOP QUESTIONS": {
+      "total": 31,
+      "SUPPORTED": 1,
+      "PARTIAL": 14,
+      "BEST_EFFORT": 16,
+      "ERROR": 0
+    },
+    "COMPARISON QUESTIONS": {
+      "total": 23,
+      "SUPPORTED": 0,
+      "PARTIAL": 9,
+      "BEST_EFFORT": 14,
+      "ERROR": 0
+    },
+    "REAL HOTPOTQA QUESTIONS": {
+      "total": 15,
+      "SUPPORTED": 0,
+      "PARTIAL": 3,
+      "BEST_EFFORT": 12,
+      "ERROR": 0
+    },
+    "FILM AND ENTERTAINMENT": {
+      "total": 26,
+      "SUPPORTED": 0,
+      "PARTIAL": 13,
+      "BEST_EFFORT": 13,
+      "ERROR": 0
+    },
+    "SCIENCE AND TECHNOLOGY": {
+      "total": 25,
+      "SUPPORTED": 0,
+      "PARTIAL": 8,
+      "BEST_EFFORT": 17,
+      "ERROR": 0
+    },
+    "HISTORY AND GEOGRAPHY": {
+      "total": 25,
+      "SUPPORTED": 0,
+      "PARTIAL": 6,
+      "BEST_EFFORT": 19,
+      "ERROR": 0
+    },
+    "QUESTIONS LIKELY TO ABSTAIN": {
+      "total": 11,
+      "SUPPORTED": 1,
+      "PARTIAL": 4,
+      "BEST_EFFORT": 6,
+      "ERROR": 0
+    }
+  },
+  "results": [
+    {
+      "question": "What year was the Eiffel Tower built?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "1889.\n\nExplanation: The Eiffel Tower was built for the 1889 Universal Exposition in Paris, France.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 9.89
+    },
+    {
+      "question": "Who wrote the play Hamlet?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "William Shakespeare.\n\nExplanation: The question directly asks for the author of the play Hamlet.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.59
+    },
+    {
+      "question": "What country is the Amazon River in?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Brazil.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 3.79
+    },
+    {
+      "question": "When was Wikipedia founded?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "2004.\n\nThe answer is based on the establishment of the Breton Wikipedia in June 2004.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.35
+    },
+    {
+      "question": "Who painted the Mona Lisa?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "There is no information about who painted the Mona Lisa in the provided context.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.72
+    },
+    {
+      "question": "Where was Albert Einstein born?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "There is no information provided about Albert Einstein's birthplace.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.06
+    },
+    {
+      "question": "What is the capital of France?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Paris.\n\nIt is the capital city and main cultural and commercial centre of France.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 2.0
+    },
+    {
+      "question": "What is the capital of Australia?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Canberra. \nThe capital city of Australia serves as the country's administrative center.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.91
+    },
+    {
+      "question": "Who invented the telephone?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Alexander Graham Bell.\n\nHe is credited with patenting the first practical telephone.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 3.13
+    },
+    {
+      "question": "Who invented the light bulb?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "None of the individuals listed in the context are credited with inventing the light bulb.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.18
+    },
+    {
+      "question": "What year did World War 2 end?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "1945.\n\nThe war in Europe ended on May 8, 1945.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.08
+    },
+    {
+      "question": "What year did World War 1 start?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "1914.\n\nThe immediate cause of the war was the June 28, 1914 assassination of Archduke Franz Ferdinand, heir to the Austro-Hungarian throne.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.45
+    },
+    {
+      "question": "What sport does Cristiano Ronaldo play?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Football.\n\nExplanation: Football is also known as soccer in some countries.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 3.26
+    },
+    {
+      "question": "What sport is Serena Williams known for?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Tennis.\n\nSerena Williams is widely regarded as one of the greatest female tennis players of all time, having achieved numerous records and accolades throughout her career.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.62
+    },
+    {
+      "question": "Who wrote the novel 1984?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "George Orwell.\n\nExplanation: George Orwell was the author of the dystopian novel \"1984\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 3.56
+    },
+    {
+      "question": "Who wrote the novel Frankenstein?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Mary Shelley.\n\nShe was a British novelist, short story writer, dramatist, essayist, biographer, and travel writer who is best known for her Gothic novel \"Frankenstein; or, The Modern Prometheus\" (1818).",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.98
+    },
+    {
+      "question": "Who wrote the novel Dracula?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Bram Stoker.\n\nExplanation: Bram Stoker is credited as the author of the 1897 Gothic horror novel \"Dracula\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.24
+    },
+    {
+      "question": "Who wrote Pride and Prejudice?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Jane Austen.\n\nShe is the original author of the novel \"Pride and Prejudice\", which was adapted into various film versions.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.94
+    },
+    {
+      "question": "Who wrote Romeo and Juliet?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "William Shakespeare. \nHe was the author of the original tragedy \"Romeo and Juliet\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.75
+    },
+    {
+      "question": "What country is the Taj Mahal located in?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "India.\n\nExplanation: The question mentions that the Taj Mahal is located in Kaser Kalan, a small village in Bulandshahar of Uttar Pradesh, India.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.34
+    },
+    {
+      "question": "What is the largest planet in the solar system?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Jupiter.\n\nIt is the largest planet in the Solar System.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.75
+    },
+    {
+      "question": "What is the smallest planet in the solar system?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Uranus.\n\nIt is not a planet but one of the gas giants.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.85
+    },
+    {
+      "question": "Who was the first person to walk on the moon?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Neil Armstrong.\n\nHe became the first man to walk on the Moon on July 20, 1969.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 3.28
+    },
+    {
+      "question": "What year was the first iPhone released?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "2011.\n\nThe iPhone 4S (retroactively stylized with a lowercase 's' as iPhone 4s) is a smartphone that was designed and marketed by Apple Inc. It is the fifth generation of the iPhone, succeeding the iPhone 4 and preceding the iPhone 5.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.91
+    },
+    {
+      "question": "Who founded Microsoft?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Bill Gates and Paul Allen co-founded Microsoft.\n\nExplanation: They are mentioned as co-founders in context [2].",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.36
+    },
+    {
+      "question": "Who founded Amazon?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "There is no information provided about who founded Amazon.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.8
+    },
+    {
+      "question": "Who founded Facebook?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Mark Zuckerberg co-founded Facebook with Eduardo Saverin, Andrew McCollum, and Chris Hughes.\n\nExplanation: Mark Zuckerberg is credited as the primary founder of Facebook along with his co-founders Eduardo Saverin, Andrew McCollum, and Chris Hughes.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.21
+    },
+    {
+      "question": "What language is spoken in Brazil?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Portuguese.\n\nExplanation: The question does not provide information about languages spoken in Brazil, but it does mention that Portuguese is the official language of Brazil.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.37
+    },
+    {
+      "question": "What language is spoken in Egypt?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Arabic.\n\nArabic is a Semitic language within the Afroasiatic family that originated on the Arabian Peninsula and is widely spoken in Egypt as a primary language.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.91
+    },
+    {
+      "question": "What is the longest river in the world?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Mackenzie River.\n\nThe Mackenzie River is the largest and longest river system in Canada.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.27
+    },
+    {
+      "question": "What is the tallest mountain in the world?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Mount Everest (8,848 m) \n\nIt is Earth's highest mountain.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.53
+    },
+    {
+      "question": "What ocean is the largest?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "The Pacific Ocean.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.75
+    },
+    {
+      "question": "Who directed the film Titanic?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "James Francis Cameron.\n\nHe is a Canadian filmmaker, director, producer, screenwriter, inventor, engineer, philanthropist, and deep-sea explorer.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.86
+    },
+    {
+      "question": "Who directed the film Avatar?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "James Cameron.\n\nHe is also credited as the director of the sequels to the film.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 2.94
+    },
+    {
+      "question": "Who directed the film Jurassic Park?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Steven Spielberg.\n\nExplanation: He was the director and producer of the original 1993 film \"Jurassic Park\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.57
+    },
+    {
+      "question": "Who starred in the film Forrest Gump?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Tom Hanks, Robin Wright, Gary Sinise, Mykelti Williamson, and Sally Field.\n\nThe film features a notable ensemble cast.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 3.75
+    },
+    {
+      "question": "Who wrote Harry Potter?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "J.K. Rowling.\n\nExplanation: J.K.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.31
+    },
+    {
+      "question": "What year was Harry Potter first published?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "1998.\n\nExplanation: The book was initially published in the United Kingdom by Bloomsbury in 1997, but it was published in the United States as \"Harry Potter and the Sorcerer's Stone\" by Scholastic Corporation in 1998.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 2.32
+    },
+    {
+      "question": "What country invented the Olympic Games?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "Greece.\n\nExplanation: The ancient Greek sporting festivals, including the Olympic Games, are considered to have originated in Greece.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.95
+    },
+    {
+      "question": "What year were the first modern Olympic Games held?",
+      "category": "SIMPLE QUESTIONS",
+      "answer": "1896.\n\nExplanation: This is stated in context [6] as the birth of the modern Olympic movement.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.95
+    },
+    {
+      "question": "Who directed the film Sinister?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Scott Derrickson.\n\nHe is an American director, screenwriter and producer known for directing horror films such as \"Sinister\", \"The Exorcism of Emily Rose\", and \"Deliver Us From Evil\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.68
+    },
+    {
+      "question": "Who directed the film Doctor Strange?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Scott Derrickson. He is an American director, screenwriter, and producer who directed the 2016 Marvel Cinematic Universe installment \"Doctor Strange\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 3.24
+    },
+    {
+      "question": "Who directed the film The Exorcism of Emily Rose?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Scott Derrickson. He is an American director, screenwriter and producer known for directing horror films such as \"Sinister\", \"The Exorcism of Emily Rose\", and \"Deliver Us From Evil\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.73
+    },
+    {
+      "question": "What nationality is the director of the film Sinister?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "American.\n\nExplanation: The context states that Scott Derrickson is an American director.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.13
+    },
+    {
+      "question": "Who wrote the novel that the film The Shining is based on?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Stephen King. \n\nHe co-wrote the screenplay with novelist Diane Johnson for the 1980 film adaptation and also wrote the original novel in 1977.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.07
+    },
+    {
+      "question": "Who wrote the novel that the film Fight Club is based on?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Chuck Palahniuk.\n\nExplanation: Chuck Palahniuk is the author of the 1996 novel \"Fight Club\", which was adapted into a film in 1999.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.85
+    },
+    {
+      "question": "Who founded the company that makes the iPhone?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Steve Jobs.\n\nExplanation: Steve Jobs was one of the co-founders of Apple Inc., which designs and manufactures consumer electronics and software products, including the iPhone.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.72
+    },
+    {
+      "question": "Who founded the company that makes Windows?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Bill Gates co-founded Microsoft Corporation, which develops the Windows operating system.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.54
+    },
+    {
+      "question": "What is the birth country of the director of Jurassic Park?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "United States.\n\nExplanation: The context mentions that Steven Spielberg, the director of Jurassic Park, was born in the United States.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 3.09
+    },
+    {
+      "question": "What year was the author of 1984 born?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "1903.\n\nExplanation: The question provides information about George Orwell's birthdate.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.69
+    },
+    {
+      "question": "What year was the author of Frankenstein born?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "1797.\n\nThe answer is provided directly from the context without any additional explanation.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.46
+    },
+    {
+      "question": "What year was the author of Dracula born?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "1892.\n\nExplanation: The birth year of Bram Stoker, the Irish author who wrote the novel \"Dracula\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.28
+    },
+    {
+      "question": "What is the capital of the country where the Eiffel Tower is located?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Paris.\n\nThe Eiffel Tower is located in Paris, France.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.67
+    },
+    {
+      "question": "What is the official language of the country where the Taj Mahal is located?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "No information about the official language of Bangladesh is provided in the context.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.79
+    },
+    {
+      "question": "Who is the founder of the company that created the Android operating system?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "There is no mention of who founded the company that created the Android operating system in the provided context.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.83
+    },
+    {
+      "question": "What sport is played at Wimbledon?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Tennis.\n\nExplanation: The context explicitly states that Wimbledon Championships was a tennis tournament.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 3.98
+    },
+    {
+      "question": "What country is Wimbledon located in?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "England.\n\nExplanation: England is mentioned multiple times in the provided context as the location of Wimbledon.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.23
+    },
+    {
+      "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "No information is provided about the woman who portrayed Corliss Archer in the film \"Kiss and Tell\".",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.07
+    },
+    {
+      "question": "What screenwriter with credits for Rogue One graduated from the University of Exeter?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "There is no information about a screenwriter with credits for Rogue One graduating from the University of Exeter.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 3.71
+    },
+    {
+      "question": "2014 S/S is the debut album of a South Korean boy band whose name is an acronym for what?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "S/S is the debut album of a South Korean boy band whose name is an acronym for \"Skool Luv Affair\".",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.86
+    },
+    {
+      "question": "What nationality is the director of the film Saw?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "American.\n\nThe director of the film Saw is James Wan.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.92
+    },
+    {
+      "question": "The Oberoi Family is part of a hotel company that has a head office in what city?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Delhi.\n\nThe Oberoi Group, which owns and/or operates luxury hotels, has its head office in Delhi.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 3.72
+    },
+    {
+      "question": "Who is the lead vocalist of the band that wrote Bohemian Rhapsody?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Freddie Mercury.\n\nHe was known for his flamboyant stage persona and four-octave vocal range.",
+      "status": "SUPPORTED",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 0.97
+    },
+    {
+      "question": "What country was the lead vocalist of Queen born in?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "United Kingdom.\n\nThe lead vocalist of Queen, Freddie Mercury, was born Farrokh \"Freddie\" Bulsara in the United Kingdom.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 2.29
+    },
+    {
+      "question": "Who invented the World Wide Web?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "George P. Landow.\n\nHe created the 1,500 documents that constitute the kernel of the Victorian Web in 1988-90 as part of the IRIS Intermedia Project at Brown University.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.36
+    },
+    {
+      "question": "What country was the inventor of the World Wide Web born in?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "United Kingdom.\n\nThe inventor of the World Wide Web, Tim Berners-Lee, is not mentioned in the provided context. However, Michael K.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.58
+    },
+    {
+      "question": "What university did the founder of Facebook attend?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Harvard University.\n\nThe founder of Facebook attended Harvard University.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.86
+    },
+    {
+      "question": "What city is the headquarters of Apple Inc located in?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Cupertino, California.\n\nExplanation: According to the provided context, Apple Inc.'s headquarters is located in Cupertino, California.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.3
+    },
+    {
+      "question": "What country is the headquarters of Samsung located in?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "South Korea.\n\nExplanation: The text states that Samsung Group is headquartered in Samsung Town, Seoul, which is in South Korea.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.43
+    },
+    {
+      "question": "Who played Iron Man in the Marvel Cinematic Universe?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "Robert Downey Jr.\n\nHe portrayed Tony Stark/Iron Man in multiple films within the Marvel Cinematic Universe.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.42
+    },
+    {
+      "question": "What other major film franchise is the actor who played Iron Man known for?",
+      "category": "MULTI-HOP QUESTIONS",
+      "answer": "A Knight's Tale.\n\nHe first came to the attention of mainstream audiences when he appeared in this British film (2000).",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.93
+    },
+    {
+      "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "No, Ed Wood was an American filmmaker, whereas no information about Scott Derrickson's nationality is provided in the context.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 4.63
+    },
+    {
+      "question": "Which magazine was started first, Arthur's Magazine or First for Women?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "First for Women was started first, as it was founded in 1989, whereas Arthur's Magazine was published from 1844-1846.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 4.87
+    },
+    {
+      "question": "Who is older, Elvis Presley or Michael Jackson?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Elvis Presley (born January 8, 1935) is older than Michael Jackson (born August 29, 1958).",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.37
+    },
+    {
+      "question": "Who is older, Albert Einstein or Isaac Newton?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Isaac Newton.\n\nExplanation: The question does not mention Isaac Newton.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.72
+    },
+    {
+      "question": "Which band was formed first, Radiohead or Coldplay?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Coldplay was formed first, as it was formed in 1996 by Chris Martin and Jonny Buckland at University College London (UCL), whereas Radiohead was formed in 1985 by Thom Yorke and Jonny Greenwood.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 6.18
+    },
+    {
+      "question": "Which band was formed first, The Beatles or The Rolling Stones?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "The Rolling Stones were formed first, as they were formed in London in 1962, whereas The Beatles were formed in Liverpool in 1960.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 1,
+      "time_s": 1.91
+    },
+    {
+      "question": "Are both the directors of Jaws and Casino Royale from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThe directors of Jaws (Steven Spielberg) and Casino Royale (Martin Campbell) are from different countries. Steven Spielberg is American, while Martin Campbell is Scottish.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.17
+    },
+    {
+      "question": "Are the Eiffel Tower and Big Ben in the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThe Eiffel Tower is located in France, while Big Ben (the Elizabeth Tower) is located in England, United Kingdom.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.51
+    },
+    {
+      "question": "Were Apple and Microsoft both founded in the same decade?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes. \n\nApple Inc.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 6.53
+    },
+    {
+      "question": "Were Google and Amazon both founded in the same decade?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes. Alphabet Inc., which is now the parent company of Google, was created in 2015, a year within the 2000s decade.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 6.18
+    },
+    {
+      "question": "Are director of film Mannan and director of film The Accidental Spy both from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThey are both from India.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 4.86
+    },
+    {
+      "question": "Is the author of 1984 and the author of Brave New World from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "No. The author of 1984 (George Orwell) was born in Motihari, India, but later moved to England, while the author of Brave New World (Aldous Huxley) was born in Godalming, Surrey, England.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 7.37
+    },
+    {
+      "question": "Were Leonardo da Vinci and Michelangelo from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThey were both Italian artists of the High Renaissance period.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 1.65
+    },
+    {
+      "question": "Which was founded first, Harvard University or Oxford University?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Harvard University was founded first, in 1636, compared to Oxford University which has no known date of foundation but evidence of teaching as far back as 1096.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 1,
+      "time_s": 2.05
+    },
+    {
+      "question": "Which came first, the American Revolution or the French Revolution?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "The American Revolution came first, as it took place between 1765 and 1783, whereas the French Revolution occurred from 1789 onwards.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.42
+    },
+    {
+      "question": "Were Einstein and Newton both physicists?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes. Both were scientists who specialized in the field of physics.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 1,
+      "time_s": 1.35
+    },
+    {
+      "question": "Is the Amazon River longer than the Nile River?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThe context does not provide a direct comparison of the lengths of the two rivers, but it mentions that the Nyabarongo River is the longest river entirely in Rwanda, which is part of the upper headwaters of the Nile. However, this information alone is insufficient to determine the relative length of",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 7.73
+    },
+    {
+      "question": "Were Shakespeare and Christopher Marlowe from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThey were both English playwrights, poets, and translators who lived during the Elizabethan era in England.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 2,
+      "time_s": 4.2
+    },
+    {
+      "question": "Which film was released first, Jaws or Star Wars?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "The film \"Jaws\" was released first, as it was released in 1975, while the film \"Star Wars\" was released in 1977.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 1,
+      "time_s": 1.87
+    },
+    {
+      "question": "Which film was released first, Alien or Blade Runner?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Alien was released first, as it was directed by Ridley Scott and released in 1979, whereas Blade Runner was released in 1982",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 6.28
+    },
+    {
+      "question": "Were the Wright Brothers and Henry Ford from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes. \n\nThey were both American inventors and pioneers in their respective fields, with the Wright brothers being credited with inventing and building the world's first successful airplane, and Henry Ford being a prominent figure in the automotive industry.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.84
+    },
+    {
+      "question": "Is Mount Everest taller than K2?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "Yes.\n\nThe summit elevation of Mount Everest is 8,848 m, while the summit elevation of K2 is 8611 m.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.83
+    },
+    {
+      "question": "Were Nikola Tesla and Thomas Edison from the same country?",
+      "category": "COMPARISON QUESTIONS",
+      "answer": "No, they were not from the same country. \n\nThomas Edison was born in the United States, while Nikola Tesla is not mentioned in the provided context.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.84
+    },
+    {
+      "question": "Which film came out first, Blind Shaft or The Blind Swordsman: Zatoichi?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "The Blind Husbands film came out first, as it was released in 1919, whereas The Blind Swordsman: Zatoichi does not exist in the provided context; however, a similar entity called \"Blind Trust\" is mentioned, but its release year is not specified.",
+      "status": "BEST_EFFORT",
+      "query_type": "COMPARISON",
+      "iterations": 3,
+      "time_s": 5.93
+    },
+    {
+      "question": "Were the pioneers of Rap and Hip Hop from the same city?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "Yes. \n\nThe context states that Gotas de Rap (\"Drops of Rap\") were a Colombian rap group from Bogotá, who are considered as one of the pioneers of Colombian rap music, along with Los Generales R&R and La Etnnia.",
+      "status": "PARTIAL",
+      "query_type": "COMPARISON",
+      "iterations": 2,
+      "time_s": 4.95
+    },
+    {
+      "question": "What year was the company that created the Sega Saturn founded?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "1994.\n\nThe company that created the Sega Saturn was founded in 1994.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.69
+    },
+    {
+      "question": "Who was the founder of the company that produced the Sega Saturn?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "The founder of the company that produced the Sega Saturn is not mentioned in the provided context.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.02
+    },
+    {
+      "question": "What is the name of the first artificial satellite launched by the Soviet Union?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "Sputnik 1.\n\nExplanation: Sputnik 1 was the first artificial satellite launched into Earth's orbit by the Soviet Union on October 4, 1957.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.73
+    },
+    {
+      "question": "What year was the first artificial satellite launched?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "1957. The Soviet Union's launch of Sputnik 1 marked the beginning of the space age and the first successful launch of an artificial satellite into Earth orbit.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.52
+    },
+    {
+      "question": "Who is the lead actor in the film that won the Academy Award for Best Picture in 1994?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "There is no information about a specific film winning the Academy Award for Best Picture in 1994.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.62
+    },
+    {
+      "question": "What country was the director of Schindler's List born in?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "United States.\n\nExplanation: Steven Spielberg is an American film director and producer.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.5
+    },
+    {
+      "question": "Who wrote the screenplay for the film that starred Tom Hanks in Forrest Gump?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "Winston Groom.\n\nExplanation: Winston Groom is the author of the novel on which the film Forrest Gump is based.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.16
+    },
+    {
+      "question": "What university did the inventor of the World Wide Web attend?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "Harvard University. \n\nExplanation: According to [3], W.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.01
+    },
+    {
+      "question": "What year was the university that the inventor of the World Wide Web attended founded?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "1993.\n\nThe university that the inventor of the World Wide Web (Tim Berners-Lee) attended is not explicitly mentioned in the provided context. However, it can be inferred that the University of Stirling in Scotland, where JumpStation was hosted, is likely the correct answer based on the information about JumpStation's founding year.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.65
+    },
+    {
+      "question": "Which country hosted the first FIFA World Cup?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "France. France was the original host of the tournament that later became known as the King Fahd Cup, which was founded by Saudi Arabia in 1988.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.17
+    },
+    {
+      "question": "What year was the first FIFA World Cup held?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "1930. The first FIFA World Cup was held in Uruguay, marking the beginning of the quadrennial international football world championship tournament.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 3.3
+    },
+    {
+      "question": "Who scored the most goals in the first FIFA World Cup?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "Justo Fontaine. \n\nHe was a prolific forward who holds the record for most goals scored in a single edition of the FIFA World Cup, with 13 in six matches in 1958.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.48
+    },
+    {
+      "question": "What is the nationality of the chef who has the most Michelin stars?",
+      "category": "REAL HOTPOTQA QUESTIONS",
+      "answer": "British.\n\nExplanation: Marco Pierre White, a British chef, holds the record for being the youngest chef to have been awarded three Michelin stars.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.84
+    },
+    {
+      "question": "Who directed the film Hereditary?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "There is no information provided about the film \"Hereditary\" in the context.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 3.96
+    },
+    {
+      "question": "Who directed the film Get Out?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Clay DuMaw.\n\nHe directed the 2012 American Horror/Thriller film \"Get Out Alive\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.48
+    },
+    {
+      "question": "Who directed the film The Silence of the Lambs?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Jonathan Demme.\n\nHe was the director of the 1991 American horror-thriller film \"The Silence of the Lambs\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.11
+    },
+    {
+      "question": "Who starred in the film The Silence of the Lambs?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Jodie Foster, Anthony Hopkins, and Scott Glenn.\n\nThe film featured a notable ensemble cast, including Jodie Foster as Clarice Starling, Anthony Hopkins as Dr. Hannibal Lecter, and Scott Glenn as Jack Crawford.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 3.71
+    },
+    {
+      "question": "Who directed the film Se7en?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "David Fincher. He is known for directing several notable films, including Seven, which premiered in 1995.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.23
+    },
+    {
+      "question": "Who starred in the film Se7en?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Brad Pitt and Morgan Freeman.\n\nThe two actors played the lead roles of David Mills and William Somerset in the 1995 American neo-noir crime thriller film.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.9
+    },
+    {
+      "question": "Who directed the film Interstellar?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Christopher Nolan.\n\nHe is also known for directing other notable films such as \"Inception\", \"The Dark Knight\" trilogy, and \"Dunkirk\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.68
+    },
+    {
+      "question": "Who composed the music for the film Interstellar?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Hans Zimmer.\n\nExplanation: Hans Zimmer is a renowned German film score composer who previously scored several notable films, including Nolan's previous works.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.41
+    },
+    {
+      "question": "Who directed the film The Dark Knight?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Christopher Nolan.\n\nHe is a British-American director, producer, and screenwriter known for his work on several successful films.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.58
+    },
+    {
+      "question": "Who played Batman in The Dark Knight?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Christian Bale.\n\nHe portrayed the character in Christopher Nolan's \"The Dark Knight\" (2008) and its sequels.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.71
+    },
+    {
+      "question": "Who played the Joker in The Dark Knight?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Heath Ledger.\n\nExplanation: Heath Ledger portrayed the character of the Joker in Christopher Nolan's 2008 film \"The Dark Knight\".",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.51
+    },
+    {
+      "question": "Who directed the film Pulp Fiction?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Quentin Tarantino.\n\nHe is an American director, writer, and actor known for his distinctive filmmaking style and non-linear storytelling.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.15
+    },
+    {
+      "question": "Who starred in Pulp Fiction?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Samuel L. Jackson and John Travolta.\n\nExplanation: The question refers to the main characters played by these actors in the 1994 film \"Pulp Fiction\".",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 3.8
+    },
+    {
+      "question": "Who directed the film Schindler's List?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Steven Spielberg.\n\nHe is a director and co-producer of the film.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 3.57
+    },
+    {
+      "question": "What film won the Academy Award for Best Picture in 1994?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "There is no information provided about a film winning the Academy Award for Best Picture in 1994.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.54
+    },
+    {
+      "question": "Who directed the film that won the Academy Award for Best Picture in 1994?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "There is no information about a film winning the Academy Award for Best Picture in 1994.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.59
+    },
+    {
+      "question": "What year was the film Jurassic Park released?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "1993.\n\nThe film \"Jurassic Park\" was released in 1993.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.41
+    },
+    {
+      "question": "Who wrote the novel that Jurassic Park is based on?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Michael Crichton.\n\nExplanation: He was the author of the 1990 science fiction novel \"Jurassic Park\".",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.43
+    },
+    {
+      "question": "What year was the film Titanic released?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "2010.\n\nThe film was released direct-to-TV in Australia on August 7, 2010.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.26
+    },
+    {
+      "question": "What year was the film Avatar released?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "2009.\n\nThe film \"Avatar\" was released in 2009.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.33
+    },
+    {
+      "question": "Who composed the music for Star Wars?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Hans Florian Zimmer.\n\nHe is a German film score composer and record producer who has composed music for over 150 films, including \"The Lion King\", \"Pirates of the Caribbean\" series, and \"Inception\".",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.59
+    },
+    {
+      "question": "Who directed the original Star Wars film?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "George Lucas.\n\nExplanation: He is credited as both the writer and director of the 1977 film.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.36
+    },
+    {
+      "question": "What year was the original Star Wars film released?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "1977. The first film in the series, \"Star Wars\", was released on May 25, 1977 and became a worldwide pop culture phenomenon.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.7
+    },
+    {
+      "question": "Who played Darth Vader in the original Star Wars trilogy?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "David Prowse.\n\nExplanation: David Prowse physically portrayed Darth Vader in the original Star Wars trilogy, while James Earl Jones provided the iconic voice of Darth Vader.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.27
+    },
+    {
+      "question": "Who played James Bond in Casino Royale (2006)?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Daniel Craig.\n\nHe was the first actor to play James Bond in the Eon Productions film series.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.49
+    },
+    {
+      "question": "Who directed Casino Royale (2006)?",
+      "category": "FILM AND ENTERTAINMENT",
+      "answer": "Martin Campbell.\n\nExplanation: He is mentioned as the director of the 2006 film \"Casino Royale\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.24
+    },
+    {
+      "question": "What year was the World Wide Web invented?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "1988-90.\n\nThe question asked for the specific time period when the World Wide Web was created, rather than the exact date of its invention.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 7.54
+    },
+    {
+      "question": "What year was the telephone invented?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "1885.\n\nThis answer refers to Alexander Graham Bell's patenting of the first practical telephone.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.84
+    },
+    {
+      "question": "Who invented the airplane?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "The Wright brothers (Orville and Wilbur) are generally credited with inventing, building, and flying the world's first successful airplane.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.51
+    },
+    {
+      "question": "What year did the Wright Brothers first fly?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "1903.\n\nThe Wright brothers made the first controlled, sustained flight of a powered, heavier-than-air aircraft on December 17, 1903.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.71
+    },
+    {
+      "question": "Who invented penicillin?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Sir Alexander Fleming and Jack Suchet collaborated on research using penicillin in treating venereal disease.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.68
+    },
+    {
+      "question": "What year was penicillin discovered?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "No specific year is mentioned in the provided context for the discovery of penicillin.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.61
+    },
+    {
+      "question": "Who developed the theory of relativity?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Albert Einstein.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.71
+    },
+    {
+      "question": "What year was the theory of relativity published?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "1938.\n\nExplanation: The book \"The Evolution of Physics\" by Albert Einstein and Leopold Infeld was originally published in 1938.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.98
+    },
+    {
+      "question": "Who discovered gravity?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "No one is credited with discovering gravity.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 3.09
+    },
+    {
+      "question": "Who discovered the structure of DNA?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "James Watson, Francis Crick, and Rosalind Franklin",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.19
+    },
+    {
+      "question": "What year was the structure of DNA discovered?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "1953. The co-discoverers of the structure of DNA in 1953 were James Watson, Francis Crick, and Rosalind Franklin.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.98
+    },
+    {
+      "question": "Who invented the steam engine?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Thomas Newcomen. \n\nHe was an Englishman who developed the atmospheric engine, a precursor to the modern steam engine.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.55
+    },
+    {
+      "question": "Who invented the printing press?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "None of the individuals listed invented the printing press.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 3.23
+    },
+    {
+      "question": "What year was the printing press invented?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "There is no mention of the invention of the printing press in the provided context.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 2.76
+    },
+    {
+      "question": "Who invented the radio?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Lee de Forest.\n\nHe is often referred to as the \"Father of Radio\" for his invention of the three-element \"Audion\" (triode) vacuum tube in 1906.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.13
+    },
+    {
+      "question": "Who invented the television?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Kenjiro Takayanagi.\n\nHe pioneered experiments in electronic television in the 1920s.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.08
+    },
+    {
+      "question": "What year was the first computer invented?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "1970.\n\nExplanation: The Kenbak-1 is considered to be the world's first \"personal computer\" and was invented by John V. Blankenbaker in 1970.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.59
+    },
+    {
+      "question": "Who is known as the father of computer science?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Ivan Sutherland.\n\nHe is widely regarded as the \"father of computer graphics\" and received the Turing Award for his work on Sketchpad, an early predecessor to graphical user interfaces.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.25
+    },
+    {
+      "question": "What company developed the first iPhone?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Apple Inc.\n\nExplanation: Apple was founded by Steve Jobs, Steve Wozniak, and Ronald Wayne in 1976, and it released its first product, the Apple I computer, in 1976. The first iPhone was announced on January 9, 2007, but it is believed to have been developed during this time period.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 7.21
+    },
+    {
+      "question": "What company created the Android operating system?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Google.\n\nExplanation: Google is mentioned as the developer of the Android operating system in several contexts, including [3], [4], [6], and [7].",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.09
+    },
+    {
+      "question": "What year was Google founded?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "2015.\n\nExplanation: Alphabet Inc., the parent company of Google, was created on October 2, 2015.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.77
+    },
+    {
+      "question": "What year was Facebook founded?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "2004.\n\nExplanation: According to the provided context, Facebook was launched in 2004.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.6
+    },
+    {
+      "question": "What year was Twitter founded?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "There is no mention of Twitter in the provided context.\n\nExplanation: The context only discusses social networking websites and their founders, but does not include Twitter.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 2.86
+    },
+    {
+      "question": "What year was YouTube founded?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "2005.\n\nThe service was created by three former PayPal employees — Chad Hurley, Steve Chen, and Jawed Karim — in February 2005.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.51
+    },
+    {
+      "question": "Who co-founded Apple with Steve Jobs?",
+      "category": "SCIENCE AND TECHNOLOGY",
+      "answer": "Steve Wozniak.\n\nExplanation: Wozniak was one of the three co-founders of Apple along with Steve Jobs and Ronald Wayne.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.1
+    },
+    {
+      "question": "Who was the first President of the United States?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "General George Washington.\n\nHe was the commander-in-chief of the Continental Army during the American Revolutionary War and later became the first President of the United States under the Constitution.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.59
+    },
+    {
+      "question": "Who was the first Prime Minister of the United Kingdom?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Sir Robert Walpole.\n\nHe is considered by modern historians as the first Prime Minister due to his role in leading the government from 1721 to 1742.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.42
+    },
+    {
+      "question": "What year was the United States Declaration of Independence signed?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "1787. The Signing of the United States Constitution occurred on September 17, 1787, at Independence Hall in Philadelphia, Pennsylvania.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.43
+    },
+    {
+      "question": "What year did the Berlin Wall fall?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "No specific year is mentioned in the provided context.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 1,
+      "time_s": 1.33
+    },
+    {
+      "question": "What year did the Soviet Union dissolve?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "1991.\n\nThe Soviet Union collapsed on December 26, 1991.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.46
+    },
+    {
+      "question": "Who was the first man to walk on the moon?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Neil Armstrong. He became the first man to walk on the Moon on July 20, 1969.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.69
+    },
+    {
+      "question": "What year did humans first land on the moon?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "1969.\n\nThe year humans first landed on the Moon is mentioned in multiple sources, including the context about the Apollo 11 spaceflight and the documentary film \"Moonwalk One\".",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 2,
+      "time_s": 3.42
+    },
+    {
+      "question": "What is the capital of Japan?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Tokyo.\n\nExplanation: The question does not provide information about the capital of Japan.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.29
+    },
+    {
+      "question": "What is the capital of China?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Beijing.\n\nExplanation: Beijing is the capital of the People's Republic of China.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.46
+    },
+    {
+      "question": "What is the capital of India?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "New Delhi.\n\nExplanation: The context does not explicitly mention the current capital of India, but it does state that India's Andaman and Nicobar Islands share a maritime border with Thailand and Indonesia, implying that New Delhi might be the capital.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.24
+    },
+    {
+      "question": "What is the capital of Brazil?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "There is no information provided about the capital of Brazil within the given context.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.22
+    },
+    {
+      "question": "What is the capital of Canada?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Ottawa.\n\nExplanation: Ottawa is explicitly stated as the capital city of Canada in context [2].",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 3.68
+    },
+    {
+      "question": "What is the largest country in the world by area?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Russia.\n\nExplanation: Not present in the provided context.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.1
+    },
+    {
+      "question": "What is the most populous country in the world?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "China, with a population of around 3 billion. \n\nChina is the world's most populous country due to its large land area and high population density.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.23
+    },
+    {
+      "question": "What is the smallest country in the world?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Vatican City.\n\nIt is the smallest country in both area (44 hectares) and population (1,000).",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.6
+    },
+    {
+      "question": "What is the longest river in Africa?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "The Zambezi River, approximately 2150 km long.\n\nIt is the second-longest river in Africa that drains to the Indian Ocean, after the Limpopo River.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.87
+    },
+    {
+      "question": "What is the highest mountain in Africa?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Mafadi, with an elevation of 3450 m.\n\nExplanation: Mafadi is located on the border of South Africa and Lesotho.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.21
+    },
+    {
+      "question": "What ocean lies between Europe and North America?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "The Atlantic Ocean.\n\nThis answer is based on the geographical information provided in the context, which states that Europe is bordered by the Atlantic Ocean to the west.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 3.86
+    },
+    {
+      "question": "What is the capital of Nepal?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Kathmandu.\n\nExplanation: Kathmandu is mentioned as the location of Tribhuvan International Airport, which is described as the sole international airport in Nepal and located about six kilometres from the city centre.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.59
+    },
+    {
+      "question": "What year did Nepal become a republic?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "No specific year is mentioned in the provided context.",
+      "status": "PARTIAL",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.14
+    },
+    {
+      "question": "What is the highest mountain in the world?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Mount Everest. It is located in the Mahalangur Himal sub-range of the Himalayas, with an elevation of 8,848 m above sea level.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.25
+    },
+    {
+      "question": "In what country is Mount Everest located?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "China (Tibet Autonomous Region).\n\nExplanation: Although Mount Everest is situated on the international border between China and Nepal, its location is specifically within the Tibet Autonomous Region of China.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.15
+    },
+    {
+      "question": "What is the deepest lake in the world?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "The Mariana Trench.\n\nExplanation: It is located in the western Pacific Ocean, with a maximum-known depth of 10994 m (± 40 m ) at its southern end.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 6.18
+    },
+    {
+      "question": "What is the largest desert in the world?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "The Patagonian Desert, occupying 673,000 square kilometers (260,000 mi), is the largest desert in the world.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.82
+    },
+    {
+      "question": "What country has the most UNESCO World Heritage Sites?",
+      "category": "HISTORY AND GEOGRAPHY",
+      "answer": "Turkey.\n\nExplanation: Turkey has seventeen World Heritage Sites, which is more than any other country mentioned in the provided context.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.15
+    },
+    {
+      "question": "Who is the current Prime Minister of Nepal?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "Narendra Modi.\n\nHe is the 14th and current Prime Minister of India, in office since May 2014.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 6.81
+    },
+    {
+      "question": "Who is the current President of the United States?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "Donald Trump.\n\nHe is currently serving his day in office.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 4.16
+    },
+    {
+      "question": "What is the current population of the world?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "7.5 billion.\n\nThe world population was estimated to have reached this number in April 2017.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.63
+    },
+    {
+      "question": "What is the latest version of Python?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "There is no information provided about a specific \"Python\" film or movie being released after 2000.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 3.92
+    },
+    {
+      "question": "What is the most recent iPhone model?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "iPhone 7 and 7 Plus (introduced on September 7, 2016).\n\nThe Apple A10 Fusion chip was first introduced in these models, which had improved performance compared to its predecessor, the Apple A9.",
+      "status": "SUPPORTED",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 5.19
+    },
+    {
+      "question": "Who won the FIFA World Cup in 2026?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "No information is provided about the winner of the 2026 FIFA World Cup.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.42
+    },
+    {
+      "question": "What is today's weather in Kathmandu?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "There is no information provided about the current weather conditions in Kathmandu.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 2,
+      "time_s": 2.92
+    },
+    {
+      "question": "What is the current price of Bitcoin?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "There is no mention of the current price of Bitcoin in the provided context.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 4.06
+    },
+    {
+      "question": "Who won the most recent Academy Awards Best Picture?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "The 55th Academy Awards ceremony was presented April 11, 1983. \n\nExplanation: The question refers to the most recent information provided in context, which is the 55th Academy Awards ceremony held on April 11, 1983.",
+      "status": "PARTIAL",
+      "query_type": "SIMPLE",
+      "iterations": 1,
+      "time_s": 1.81
+    },
+    {
+      "question": "What is the most popular song right now?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "There is no information provided about what is the most popular song right now.\n\nExplanatory sentence: The context only provides historical data on past music charts, including Billboard's Dance Club Songs chart and other music-related records.",
+      "status": "BEST_EFFORT",
+      "query_type": "SIMPLE",
+      "iterations": 3,
+      "time_s": 7.43
+    },
+    {
+      "question": "Who is the current richest person in the world?",
+      "category": "QUESTIONS LIKELY TO ABSTAIN",
+      "answer": "Paul Allen.\n\nHe is estimated to be the 46th richest person in the world, with an estimated net worth of $20.7 billion as of June 2017.",
+      "status": "BEST_EFFORT",
+      "query_type": "MULTI_HOP",
+      "iterations": 3,
+      "time_s": 5.81
+    }
+  ]
+}
