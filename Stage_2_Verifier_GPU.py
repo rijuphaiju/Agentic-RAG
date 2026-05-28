@@ -46,10 +46,12 @@ from transformers import DistilBertTokenizerFast, DistilBertModel
 # 
 # CONFIG
 # 
-DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
-MAX_SEQ_LEN    = 512   # raised from 256 — inference context can be 1000+ chars; 256 silently truncated it
+DEVICE         = ("cuda" if torch.cuda.is_available()
+                  else "mps" if torch.backends.mps.is_available()
+                  else "cpu")
+MAX_SEQ_LEN    = 256   # contexts capped at 800 chars (~130 tokens) + short answers — 256 is sufficient
 NUM_CLASSES    = 3
-BATCH_SIZE     = 32 if DEVICE == "cuda" else 8   # DistilBERT needs more VRAM than custom model
+BATCH_SIZE     = 64 if DEVICE == "mps" else (32 if DEVICE == "cuda" else 8)  # M4 Air: 16GB unified memory handles 64
 EPOCHS         = 8
 LR             = 2e-5   # standard fine-tuning LR for BERT-family models
 TRAIN_SAMPLES  = 30000
@@ -64,7 +66,15 @@ LABEL_COLORS = {0: "[OK]", 1: "[!!]", 2: "[X]"}
 BERT_MODEL   = "distilbert-base-uncased"
 
 print(f"[Device] Using: {DEVICE.upper()}"
-      + (f" -- {torch.cuda.get_device_name(0)}" if DEVICE == "cuda" else " (CPU fallback)"))
+      + (f" -- {torch.cuda.get_device_name(0)}" if DEVICE == "cuda"
+         else " -- Apple Silicon GPU (MPS)" if DEVICE == "mps"
+         else " (CPU fallback)"))
+
+# M4 Air optimisations
+if DEVICE == "mps":
+    torch.set_float32_matmul_precision("high")          # faster matmul on Apple Silicon
+    if hasattr(torch.backends.mps, "enable_flash_sdp"):
+        torch.backends.mps.enable_flash_sdp(True)       # Flash Attention on MPS (PyTorch 2.2+)
 
 
 # 
@@ -131,27 +141,30 @@ def build_training_data(num_samples=TRAIN_SAMPLES):
 # 
 class VerifierDataset(Dataset):
     def __init__(self, data, tokenizer, max_len=MAX_SEQ_LEN):
-        self.data      = data
-        self.tokenizer = tokenizer
-        self.max_len   = max_len
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        item    = self.data[idx]
-        encoded = self.tokenizer(
-            item["answer"],          # sentence A
-            item["context"],         # sentence B (context is longer, goes second)
-            max_length=self.max_len,
+        # Pre-tokenize entire split once so __getitem__ does zero CPU work.
+        # Batch tokenization is ~10x faster than per-sample tokenization.
+        print(f"  Pre-tokenizing {len(data):,} examples (one-time cost)...")
+        encoded = tokenizer(
+            [d["answer"]  for d in data],
+            [d["context"] for d in data],
+            max_length=max_len,
             padding="max_length",
             truncation=True,
             return_tensors="pt",
         )
+        # Move to device once — eliminates per-batch CPU→MPS transfers
+        self.input_ids      = encoded["input_ids"].to(DEVICE)
+        self.attention_mask = encoded["attention_mask"].to(DEVICE)
+        self.labels         = torch.tensor([d["label"] for d in data], dtype=torch.long).to(DEVICE)
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
         return {
-            "input_ids":      encoded["input_ids"].squeeze(0),
-            "attention_mask": encoded["attention_mask"].squeeze(0),
-            "label":          torch.tensor(item["label"], dtype=torch.long),
+            "input_ids":      self.input_ids[idx],
+            "attention_mask": self.attention_mask[idx],
+            "label":          self.labels[idx],
         }
 
 
@@ -207,8 +220,8 @@ def run_epoch(model, loader, criterion, optimizer=None, scheduler=None,
     is_train = optimizer is not None
     model.train() if is_train else model.eval()
 
-    total_loss = 0.0
-    all_preds, all_labels = [], []
+    total_loss = torch.tensor(0.0, device=DEVICE)
+    pred_chunks, label_chunks = [], []   # accumulate on-device, sync once per epoch
 
     ctx = torch.enable_grad() if is_train else torch.no_grad()
     with ctx:
@@ -218,6 +231,7 @@ def run_epoch(model, loader, criterion, optimizer=None, scheduler=None,
             labels    = batch["label"].to(DEVICE)
 
             if is_train and scaler is not None:
+                # CUDA path — AMP with GradScaler
                 with autocast("cuda"):
                     logits = model(input_ids, attn_mask)
                     loss   = criterion(logits, labels)
@@ -229,7 +243,20 @@ def run_epoch(model, loader, criterion, optimizer=None, scheduler=None,
                 scaler.update()
                 if scheduler:
                     scheduler.step()
+            elif DEVICE == "mps":
+                # MPS path — pure float32
+                logits = model(input_ids, attn_mask)
+                loss   = criterion(logits, labels)
+                if is_train:
+                    optimizer.zero_grad(set_to_none=True)  # faster than zeroing
+                    loss.backward()
+                    # clip_grad_norm_ calls .item() internally → MPS sync every step; skip it.
+                    # LR=2e-5 is conservative enough for stable DistilBERT fine-tuning.
+                    optimizer.step()
+                    if scheduler:
+                        scheduler.step()
             else:
+                # CPU path
                 logits = model(input_ids, attn_mask)
                 loss   = criterion(logits, labels)
                 if is_train:
@@ -240,15 +267,17 @@ def run_epoch(model, loader, criterion, optimizer=None, scheduler=None,
                     if scheduler:
                         scheduler.step()
 
-            total_loss += loss.item()
-            preds = logits.argmax(dim=-1)
-            all_preds.extend(preds.cpu().tolist())
-            all_labels.extend(labels.cpu().tolist())
+            total_loss += loss.detach()                    # stays on device — no sync
+            pred_chunks.append(logits.detach().argmax(dim=-1))
+            label_chunks.append(labels)
 
-    avg_loss          = total_loss / len(loader)
-    acc               = sum(p == l for p, l in zip(all_preds, all_labels)) / len(all_labels)
-    per_f1, macro_f1  = compute_macro_f1(all_labels, all_preds)
-    return avg_loss, acc, macro_f1, per_f1, all_preds, all_labels
+    # Single GPU→CPU sync per epoch instead of 3× per step
+    avg_loss          = (total_loss / len(loader)).item()
+    all_preds         = torch.cat(pred_chunks).cpu().tolist()
+    all_labels_cpu    = torch.cat(label_chunks).cpu().tolist()
+    acc               = sum(p == l for p, l in zip(all_preds, all_labels_cpu)) / len(all_labels_cpu)
+    per_f1, macro_f1  = compute_macro_f1(all_labels_cpu, all_preds)
+    return avg_loss, acc, macro_f1, per_f1, all_preds, all_labels_cpu
 
 
 def train(model, train_loader, val_loader):
@@ -272,7 +301,7 @@ def train(model, train_loader, val_loader):
         return max(0.0, (total_steps - step) / max(1, total_steps - warmup_steps))
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    scaler         = GradScaler("cuda") if DEVICE == "cuda" else None
+    scaler         = GradScaler("cuda") if DEVICE == "cuda" else None  # MPS doesn't support GradScaler
     best_macro_f1  = 0.0
     patience_count = 0
     history        = []

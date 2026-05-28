@@ -30,6 +30,7 @@ from Stage_1_RAG_Pipeline import (
     INDEX_PATH, PASSAGES_PATH,
 )
 from Stage_2_RAG_Pipeline import rag_query_stage2 as run_s2
+from Stage_3_Adaptive_Retrieval import adaptive_rag_query as run_s3
 from Stage_4_Agentic_Loop import agentic_query as run_s4
 from Stage_2_Verifier_GPU import load_verifier, VERIFIER_PATH
 
@@ -81,7 +82,7 @@ app.add_middleware(
 # ── Request / Response models ──
 class ChatRequest(BaseModel):
     question: str
-    stage: Literal["stage1", "stage2", "stage4"] = "stage4"
+    stage: Literal["stage1", "stage2", "stage3", "stage4"] = "stage4"
 
 
 class ChatResponse(BaseModel):
@@ -117,15 +118,46 @@ def chat(req: ChatRequest):
         )
 
     elif req.stage == "stage2":
-        result = run_s2(req.question, idx, emb, pas, verbose=False)
+        vm = _pipeline.get("verifier_model")
+        vt = _pipeline.get("verifier_tokenizer")
+        if vm is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
+            )
+        result = run_s2(req.question, idx, emb, pas, vm, vt, verbose=False)
+        scores = {k: round(float(v), 4) for k, v in result["scores"].items()}
         return ChatResponse(
             answer=result["answer"],
             stage="stage2",
             metadata={
-                "faithfulness":     round(result["faithfulness_score"], 3),
-                "confidence":       round(result["confidence_score"], 3),
-                "fallback_used":    result["used_fallback"],
+                "label":            result["label"],
+                "confidence":       round(float(result["confidence"]), 4),
+                "scores":           scores,
                 "retrieved_titles": [p["title"] for p in result["retrieved_passages"]],
+            },
+        )
+
+    elif req.stage == "stage3":
+        vm = _pipeline.get("verifier_model")
+        vt = _pipeline.get("verifier_tokenizer")
+        if vm is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
+            )
+        result = run_s3(req.question, idx, emb, pas, vm, vt)
+        verif  = result.get("verification") or {}
+        scores = {k: round(float(v), 4) for k, v in verif.get("scores", {}).items()}
+        return ChatResponse(
+            answer=result["answer"],
+            stage="stage3",
+            metadata={
+                "label":            verif.get("label", "UNKNOWN"),
+                "confidence":       round(float(verif.get("confidence", 0)), 4),
+                "scores":           scores,
+                "query_type":       result["query_type"],
+                "retrieved_titles": [p["title"] for p in result["retrieved"][:10]],
             },
         )
 

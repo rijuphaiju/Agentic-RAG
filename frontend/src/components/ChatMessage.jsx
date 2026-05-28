@@ -1,194 +1,320 @@
 import { useState } from 'react'
 
-const STATUS_CONFIG = {
-  SUPPORTED:   { color: 'var(--status-supported)', icon: '✓', label: 'Supported' },
-  PARTIAL:     { color: 'var(--status-partial)',   icon: '~', label: 'Partial'   },
-  BEST_EFFORT: { color: 'var(--status-effort)',    icon: '↻', label: 'Best Effort'},
-  ERROR:       { color: 'var(--status-error)',     icon: '✕', label: 'Error'     },
+// ── Label colour helpers ──────────────────────────────────────────────────
+const LABEL_CFG = {
+  SUPPORTED:   { color: '#22c55e', bg: 'rgba(34,197,94,0.10)',  border: 'rgba(34,197,94,0.25)',  icon: '✓', text: 'Supported'   },
+  PARTIAL:     { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.25)', icon: '~', text: 'Partial'     },
+  UNSUPPORTED: { color: '#ef4444', bg: 'rgba(239,68,68,0.10)',  border: 'rgba(239,68,68,0.25)',  icon: '✕', text: 'Unsupported' },
+  ABSTAINED:   { color: '#94a3b8', bg: 'rgba(148,163,184,0.10)',border: 'rgba(148,163,184,0.25)',icon: '—', text: 'Abstained'   },
+  UNKNOWN:     { color: '#64748b', bg: 'rgba(100,116,139,0.10)',border: 'rgba(100,116,139,0.20)',icon: '?', text: 'Unknown'     },
 }
 
-const QUERY_TYPE_COLOR = {
-  SIMPLE:     '#60a5fa',
-  MULTI_HOP:  '#a78bfa',
-  COMPARISON: '#34d399',
+const QTYPE_CFG = {
+  SIMPLE:     { color: '#60a5fa', bg: 'rgba(96,165,250,0.10)',   border: 'rgba(96,165,250,0.25)'  },
+  MULTI_HOP:  { color: '#a78bfa', bg: 'rgba(167,139,250,0.10)',  border: 'rgba(167,139,250,0.25)' },
+  COMPARISON: { color: '#34d399', bg: 'rgba(52,211,153,0.10)',   border: 'rgba(52,211,153,0.25)'  },
 }
 
+// ── Derive per-query metric values from API metadata ─────────────────────
+function deriveMetrics(stage, meta) {
+  if (!meta) return null
+
+  if (stage === 'stage1') {
+    return {
+      label:        null,
+      confidence:   null,
+      hallucinated: null,   // unknown — no verifier in Stage 1
+      abstained:    false,
+      query_type:   null,
+      iterations:   null,
+    }
+  }
+
+  if (stage === 'stage2') {
+    const lbl = meta.label || 'UNKNOWN'
+    return {
+      label:        lbl,
+      confidence:   meta.confidence,
+      hallucinated: ['PARTIAL', 'UNSUPPORTED'].includes(lbl),
+      abstained:    null,   // N/A for Stage 2
+      query_type:   null,
+      iterations:   null,
+    }
+  }
+
+  if (stage === 'stage3') {
+    const lbl = meta.label || 'UNKNOWN'
+    return {
+      label:        lbl,
+      confidence:   meta.confidence,
+      hallucinated: ['PARTIAL', 'UNSUPPORTED'].includes(lbl),
+      abstained:    null,   // N/A for Stage 3
+      query_type:   meta.query_type,
+      iterations:   null,
+    }
+  }
+
+  if (stage === 'stage4') {
+    const status = meta.status || 'UNKNOWN'
+    const abstained = status === 'ABSTAINED'
+    return {
+      label:        status,
+      confidence:   meta.verification_scores
+                      ? Math.max(...Object.values(meta.verification_scores))
+                      : null,
+      hallucinated: !abstained && status !== 'SUPPORTED',
+      abstained,
+      query_type:   meta.query_type,
+      iterations:   meta.iterations,
+    }
+  }
+
+  return null
+}
+
+// ── Main exports ──────────────────────────────────────────────────────────
 export default function ChatMessage({ message }) {
-  const isUser = message.role === 'user'
-  return isUser
+  return message.role === 'user'
     ? <UserMessage message={message} />
     : <AssistantMessage message={message} />
 }
 
 function UserMessage({ message }) {
   return (
-    <div style={styles.userRow}>
-      <div style={styles.userBubble}>
-        {message.text}
-      </div>
-      <div style={styles.userAvatar}>U</div>
+    <div style={s.userRow}>
+      <div style={s.userBubble}>{message.text}</div>
+      <div style={s.userAvatar}>U</div>
     </div>
   )
 }
 
 function AssistantMessage({ message }) {
   const [open, setOpen] = useState(false)
-  const meta = message.metadata
+  const meta    = message.metadata
+  const stage   = message.stage
+  const metrics = deriveMetrics(stage, meta)
+
+  const hasDetails = meta && (
+    (stage === 'stage4' && meta.iteration_log?.length) ||
+    meta.retrieved_titles?.length
+  )
 
   return (
-    <div style={styles.aiRow}>
-      <div style={styles.aiAvatar}>⬡</div>
-      <div style={styles.aiContent}>
-        <div style={styles.aiBubble}>
-          <p style={styles.answerText}>{message.text}</p>
+    <div style={s.aiRow}>
+      <div style={s.aiAvatar}>⬡</div>
+      <div style={s.aiContent}>
+
+        {/* Answer bubble */}
+        <div style={s.aiBubble}>
+          <p style={s.answerText}>{message.text}</p>
         </div>
 
-        {meta && message.stage === 'stage4' && (
-          <div style={styles.metaBar}>
-            <StatusBadge status={meta.status} />
-            <QueryTypeBadge type={meta.query_type} />
-            <IterBadge iterations={meta.iterations} />
-
-            <button
-              style={styles.detailsBtn}
-              onClick={() => setOpen(v => !v)}
-            >
-              {open ? 'Hide details ▲' : 'View details ▼'}
-            </button>
-          </div>
+        {/* Per-query metrics panel */}
+        {metrics && (
+          <MetricsPanel
+            stage={stage}
+            metrics={metrics}
+            meta={meta}
+            open={open}
+            onToggle={hasDetails ? () => setOpen(v => !v) : null}
+          />
         )}
 
-        {meta && message.stage === 'stage2' && (
-          <div style={styles.metaBar}>
-            <ScoreBadge label="Faithfulness" value={meta.faithfulness} />
-            <ScoreBadge label="Confidence"   value={meta.confidence}   />
-            {meta.fallback_used && (
-              <span style={{ ...styles.badge, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border:'1px solid rgba(245,158,11,0.25)' }}>
-                Fallback used
-              </span>
-            )}
-            <button
-              style={styles.detailsBtn}
-              onClick={() => setOpen(v => !v)}
-            >
-              {open ? 'Hide sources ▲' : 'View sources ▼'}
-            </button>
-          </div>
-        )}
-
-        {meta && message.stage === 'stage1' && (
-          <div style={styles.metaBar}>
-            <button
-              style={styles.detailsBtn}
-              onClick={() => setOpen(v => !v)}
-            >
-              {open ? 'Hide sources ▲' : 'View sources ▼'}
-            </button>
-          </div>
-        )}
-
-        {open && meta && <MetaPanel meta={meta} stage={message.stage} />}
+        {/* Expandable detail panel */}
+        {open && meta && <DetailPanel meta={meta} stage={stage} />}
       </div>
     </div>
   )
 }
 
-function StatusBadge({ status }) {
-  const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.BEST_EFFORT
+// ── Metrics panel ─────────────────────────────────────────────────────────
+function MetricsPanel({ stage, metrics, meta, open, onToggle }) {
+  const rows = buildMetricRows(stage, metrics, meta)
+
   return (
-    <span style={{
-      ...styles.badge,
-      color:      cfg.color,
-      background: `${cfg.color}18`,
-      border:     `1px solid ${cfg.color}40`,
-    }}>
-      {cfg.icon} {cfg.label}
-    </span>
+    <div style={s.metricsBox}>
+      <div style={s.metricsHeader}>
+        <span style={s.metricsTitle}>Per-Query Metrics</span>
+        <span style={s.stageChip}>{stageLabel(stage)}</span>
+      </div>
+
+      <div style={s.metricsGrid}>
+        {rows.map(({ label, value, valueEl }) => (
+          <div key={label} style={s.metricRow}>
+            <span style={s.metricName}>{label}</span>
+            <span style={s.metricVal}>{valueEl || value}</span>
+          </div>
+        ))}
+      </div>
+
+      {onToggle && (
+        <button style={s.detailsBtn} onClick={onToggle}>
+          {open ? 'Hide details ▲' : 'View details ▼'}
+        </button>
+      )}
+    </div>
   )
 }
 
-function QueryTypeBadge({ type }) {
-  const color = QUERY_TYPE_COLOR[type] || '#a0a0a0'
-  return (
-    <span style={{
-      ...styles.badge,
-      color,
-      background: `${color}18`,
-      border:     `1px solid ${color}40`,
-    }}>
-      {type}
-    </span>
-  )
+function buildMetricRows(stage, metrics, meta) {
+  const rows = []
+
+  // Verifier Label
+  if (stage === 'stage1') {
+    rows.push({
+      label:   'Verifier Label',
+      valueEl: <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>N/A — no verification (baseline)</span>,
+    })
+  } else {
+    const lbl = metrics.label || 'UNKNOWN'
+    const cfg = LABEL_CFG[lbl] || LABEL_CFG.UNKNOWN
+    rows.push({
+      label:   'Verifier Label',
+      valueEl: (
+        <span style={{ ...s.labelBadge, color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+          {cfg.icon} {cfg.text}
+        </span>
+      ),
+    })
+  }
+
+  // Confidence
+  if (metrics.confidence !== null) {
+    const pct = (metrics.confidence * 100).toFixed(1)
+    const color = metrics.confidence >= 0.7 ? '#22c55e'
+                : metrics.confidence >= 0.45 ? '#f59e0b'
+                : '#ef4444'
+    rows.push({
+      label:   'Confidence',
+      valueEl: <span style={{ color, fontWeight: 600 }}>{pct}%</span>,
+    })
+  }
+
+  // Query Type
+  if (metrics.query_type) {
+    const cfg = QTYPE_CFG[metrics.query_type] || {}
+    rows.push({
+      label:   'Query Type',
+      valueEl: (
+        <span style={{ ...s.labelBadge, color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+          {metrics.query_type}
+        </span>
+      ),
+    })
+  }
+
+  // Iterations (Stage 4)
+  if (metrics.iterations !== null && metrics.iterations !== undefined) {
+    rows.push({
+      label:   'Iterations Used',
+      valueEl: (
+        <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+          {metrics.iterations} / {meta.iteration_log?.length
+            ? Math.max(metrics.iterations, meta.iteration_log.length)
+            : metrics.iterations}
+        </span>
+      ),
+    })
+  }
+
+  // Hallucination
+  rows.push({
+    label:   'Hallucination',
+    valueEl: metrics.hallucinated === null
+      ? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>Unknown (no verifier)</span>
+      : metrics.hallucinated
+        ? <span style={{ color: '#ef4444', fontWeight: 600 }}>Yes — answer not fully supported</span>
+        : <span style={{ color: '#22c55e', fontWeight: 600 }}>No — answer is grounded</span>,
+  })
+
+  // Abstention Rate
+  if (stage === 'stage1') {
+    rows.push({
+      label:   'Abstention',
+      valueEl: <span style={{ color: 'var(--text-muted)' }}>0% (fixed — no mechanism to withhold)</span>,
+    })
+  } else if (stage === 'stage4') {
+    rows.push({
+      label:   'Abstention',
+      valueEl: metrics.abstained
+        ? <span style={{ color: '#94a3b8', fontWeight: 600 }}>Yes — insufficient evidence</span>
+        : <span style={{ color: 'var(--text-secondary)' }}>No</span>,
+    })
+  } else {
+    rows.push({
+      label:   'Abstention',
+      valueEl: <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>N/A — no abstention in this stage</span>,
+    })
+  }
+
+  // Macro F1 note
+  if (stage === 'stage1') {
+    rows.push({
+      label:   'Macro F1',
+      valueEl: <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>N/A — requires verifier classification</span>,
+    })
+  }
+
+  return rows
 }
 
-function IterBadge({ iterations }) {
-  return (
-    <span style={{
-      ...styles.badge,
-      color:      'var(--text-muted)',
-      background: 'var(--bg-primary)',
-      border:     '1px solid var(--border)',
-    }}>
-      {iterations}/3 iter
-    </span>
-  )
+function stageLabel(stage) {
+  return { stage1: 'Stage 1', stage2: 'Stage 2', stage3: 'Stage 3', stage4: 'Stage 4' }[stage] || stage
 }
 
-function ScoreBadge({ label, value }) {
-  const pct = Math.round(value * 100)
-  const color = pct >= 70 ? 'var(--status-supported)'
-              : pct >= 45 ? 'var(--status-partial)'
-              : 'var(--status-error)'
+// ── Expandable detail panel ───────────────────────────────────────────────
+function DetailPanel({ meta, stage }) {
   return (
-    <span style={{
-      ...styles.badge,
-      color,
-      background: `${color}18`,
-      border:     `1px solid ${color}40`,
-    }}>
-      {label}: {pct}%
-    </span>
-  )
-}
-
-function MetaPanel({ meta, stage }) {
-  return (
-    <div style={styles.metaPanel}>
-      {stage === 'stage4' && meta.iteration_log && (
-        <>
-          <div style={styles.panelSection}>
-            <div style={styles.panelTitle}>Verification Scores</div>
-            <div style={styles.scoreRow}>
-              {Object.entries(meta.verification_scores || {}).map(([k, v]) => (
-                <div key={k} style={styles.scoreItem}>
-                  <span style={styles.scoreLabel}>{k}</span>
-                  <span style={styles.scoreVal}>{(v * 100).toFixed(1)}%</span>
+    <div style={s.detailPanel}>
+      {/* Verifier score breakdown */}
+      {(meta.scores || meta.verification_scores) && (
+        <div style={s.detailSection}>
+          <div style={s.detailTitle}>Verifier Score Breakdown</div>
+          <div style={s.scoreGrid}>
+            {Object.entries(meta.scores || meta.verification_scores).map(([k, v]) => {
+              const cfg = LABEL_CFG[k] || {}
+              return (
+                <div key={k} style={s.scoreItem}>
+                  <span style={{ ...s.scoreLabel, color: cfg.color }}>{k}</span>
+                  <span style={s.scoreVal}>{(v * 100).toFixed(1)}%</span>
+                  <div style={s.scoreBar}>
+                    <div style={{ ...s.scoreBarFill, width: `${v * 100}%`, background: cfg.color || '#64748b' }} />
+                  </div>
                 </div>
-              ))}
-            </div>
+              )
+            })}
           </div>
-
-          <div style={styles.panelSection}>
-            <div style={styles.panelTitle}>Iteration Log</div>
-            {meta.iteration_log.map((it, i) => (
-              <div key={i} style={styles.iterRow}>
-                <span style={styles.iterNum}>#{it.iteration}</span>
-                <span style={styles.iterLabel(it.label)}>{it.label}</span>
-                <span style={styles.iterConf}>{(it.confidence * 100).toFixed(1)}%</span>
-                <span style={styles.iterQ}>{it.query}</span>
-              </div>
-            ))}
-          </div>
-        </>
+        </div>
       )}
 
-      {(stage === 'stage1' || stage === 'stage2') && meta.retrieved_titles && (
-        <div style={styles.panelSection}>
-          <div style={styles.panelTitle}>Retrieved Sources</div>
+      {/* Stage 4 iteration log */}
+      {stage === 'stage4' && meta.iteration_log?.length > 0 && (
+        <div style={s.detailSection}>
+          <div style={s.detailTitle}>Iteration Log</div>
+          {meta.iteration_log.map((it, i) => {
+            const cfg = LABEL_CFG[it.label] || LABEL_CFG.UNKNOWN
+            return (
+              <div key={i} style={s.iterRow}>
+                <span style={s.iterNum}>#{it.iteration}</span>
+                <span style={{ ...s.iterBadge, color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                  {cfg.icon} {it.label}
+                </span>
+                <span style={s.iterConf}>{(it.confidence * 100).toFixed(1)}%</span>
+                <span style={s.iterQ}>{it.query}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Retrieved sources */}
+      {meta.retrieved_titles?.length > 0 && (
+        <div style={s.detailSection}>
+          <div style={s.detailTitle}>Retrieved Sources</div>
           {meta.retrieved_titles.map((t, i) => (
-            <div key={i} style={styles.sourceRow}>
-              <span style={styles.sourceNum}>{i + 1}</span>
-              <span style={styles.sourceTitle}>{t}</span>
+            <div key={i} style={s.sourceRow}>
+              <span style={s.sourceNum}>{i + 1}</span>
+              <span style={s.sourceTitle}>{t}</span>
             </div>
           ))}
         </div>
@@ -197,195 +323,143 @@ function MetaPanel({ meta, stage }) {
   )
 }
 
-const styles = {
+// ── Styles ────────────────────────────────────────────────────────────────
+const s = {
   userRow: {
-    display:        'flex',
-    justifyContent: 'flex-end',
-    alignItems:     'flex-start',
-    gap:            '12px',
+    display: 'flex', justifyContent: 'flex-end',
+    alignItems: 'flex-start', gap: '12px',
   },
   userBubble: {
-    maxWidth:     '65%',
-    background:   'var(--user-bubble)',
-    color:        '#fff',
+    maxWidth: '65%', background: 'var(--user-bubble)', color: '#fff',
     borderRadius: 'var(--radius) 0 var(--radius) var(--radius)',
-    padding:      '12px 16px',
-    fontSize:     '15px',
-    lineHeight:   1.6,
-    wordBreak:    'break-word',
+    padding: '12px 16px', fontSize: '15px', lineHeight: 1.6, wordBreak: 'break-word',
   },
   userAvatar: {
-    width:          '34px',
-    height:         '34px',
-    borderRadius:   '50%',
-    background:     'var(--user-bubble)',
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'center',
-    fontSize:       '13px',
-    fontWeight:     600,
-    color:          '#fff',
-    flexShrink:     0,
+    width: '34px', height: '34px', borderRadius: '50%',
+    background: 'var(--user-bubble)', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    fontSize: '13px', fontWeight: 600, color: '#fff', flexShrink: 0,
   },
-  aiRow: {
-    display:    'flex',
-    alignItems: 'flex-start',
-    gap:        '12px',
-  },
+  aiRow:    { display: 'flex', alignItems: 'flex-start', gap: '12px' },
   aiAvatar: {
-    width:          '34px',
-    height:         '34px',
-    borderRadius:   '50%',
-    background:     'var(--accent-glow)',
-    border:         '1px solid var(--accent)',
-    display:        'flex',
-    alignItems:     'center',
-    justifyContent: 'center',
-    fontSize:       '16px',
-    color:          'var(--accent-light)',
-    flexShrink:     0,
+    width: '34px', height: '34px', borderRadius: '50%',
+    background: 'var(--accent-glow)', border: '1px solid var(--accent)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '16px', color: 'var(--accent-light)', flexShrink: 0,
   },
   aiContent: {
-    flex:          1,
-    minWidth:      0,
-    display:       'flex',
-    flexDirection: 'column',
-    gap:           '8px',
+    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px',
   },
   aiBubble: {
-    background:   'var(--bg-message-ai)',
-    border:       '1px solid var(--border)',
-    borderRadius: '0 var(--radius) var(--radius) var(--radius)',
-    padding:      '14px 18px',
+    background: 'var(--bg-message-ai)', border: '1px solid var(--border)',
+    borderRadius: '0 var(--radius) var(--radius) var(--radius)', padding: '14px 18px',
   },
   answerText: {
-    fontSize:   '15px',
-    lineHeight: 1.7,
-    color:      'var(--text-primary)',
-    whiteSpace: 'pre-wrap',
-    wordBreak:  'break-word',
+    fontSize: '15px', lineHeight: 1.7, color: 'var(--text-primary)',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
   },
-  metaBar: {
-    display:    'flex',
-    flexWrap:   'wrap',
-    alignItems: 'center',
-    gap:        '6px',
-    paddingLeft:'2px',
+
+  // Metrics box
+  metricsBox: {
+    background: 'var(--bg-primary)', border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)', padding: '12px 14px',
+    display: 'flex', flexDirection: 'column', gap: '10px',
   },
-  badge: {
-    display:      'inline-flex',
-    alignItems:   'center',
-    gap:          '4px',
-    padding:      '3px 9px',
-    borderRadius: '20px',
-    fontSize:     '12px',
-    fontWeight:   500,
-    letterSpacing:'0.01em',
+  metricsHeader: {
+    display: 'flex', alignItems: 'center', gap: '8px',
+  },
+  metricsTitle: {
+    fontSize: '11px', fontWeight: 600, letterSpacing: '0.07em',
+    textTransform: 'uppercase', color: 'var(--text-muted)',
+  },
+  stageChip: {
+    fontSize: '10px', fontWeight: 600, padding: '1px 7px',
+    borderRadius: '10px', background: 'var(--bg-active)',
+    border: '1px solid var(--border-light)', color: 'var(--accent-light)',
+    letterSpacing: '0.05em',
+  },
+  metricsGrid: {
+    display: 'flex', flexDirection: 'column', gap: '5px',
+  },
+  metricRow: {
+    display: 'flex', alignItems: 'center',
+    justifyContent: 'space-between', gap: '12px',
+    padding: '4px 0',
+    borderBottom: '1px solid rgba(255,255,255,0.04)',
+  },
+  metricName: {
+    fontSize: '12px', color: 'var(--text-muted)',
+    flexShrink: 0, minWidth: '130px',
+  },
+  metricVal: {
+    fontSize: '12px', color: 'var(--text-secondary)',
+    fontWeight: 500, textAlign: 'right',
+  },
+  labelBadge: {
+    display: 'inline-flex', alignItems: 'center', gap: '4px',
+    padding: '2px 9px', borderRadius: '20px',
+    fontSize: '11px', fontWeight: 600,
   },
   detailsBtn: {
-    marginLeft:  'auto',
-    background:  'transparent',
-    border:      'none',
-    color:       'var(--text-muted)',
-    fontSize:    '12px',
-    cursor:      'pointer',
-    padding:     '3px 6px',
-    borderRadius:'var(--radius-xs)',
-    transition:  'color 0.15s',
+    alignSelf: 'flex-end', background: 'transparent', border: 'none',
+    color: 'var(--text-muted)', fontSize: '12px', cursor: 'pointer',
+    padding: '2px 4px', borderRadius: 'var(--radius-xs)',
   },
-  metaPanel: {
-    background:   'var(--bg-primary)',
-    border:       '1px solid var(--border)',
-    borderRadius: 'var(--radius-sm)',
-    padding:      '14px 16px',
-    display:      'flex',
-    flexDirection:'column',
-    gap:          '16px',
+
+  // Detail panel
+  detailPanel: {
+    background: 'var(--bg-primary)', border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)', padding: '14px 16px',
+    display: 'flex', flexDirection: 'column', gap: '18px',
   },
-  panelSection: {
-    display:       'flex',
-    flexDirection: 'column',
-    gap:           '8px',
+  detailSection: {
+    display: 'flex', flexDirection: 'column', gap: '8px',
   },
-  panelTitle: {
-    fontSize:      '11px',
-    fontWeight:    600,
-    letterSpacing: '0.07em',
-    textTransform: 'uppercase',
-    color:         'var(--text-muted)',
-    marginBottom:  '2px',
+  detailTitle: {
+    fontSize: '11px', fontWeight: 600, letterSpacing: '0.07em',
+    textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '2px',
   },
-  scoreRow: {
-    display: 'flex',
-    gap:     '16px',
-    flexWrap:'wrap',
+  scoreGrid: {
+    display: 'flex', flexDirection: 'column', gap: '6px',
   },
   scoreItem: {
-    display:       'flex',
-    flexDirection: 'column',
-    gap:           '2px',
+    display: 'grid', gridTemplateColumns: '110px 48px 1fr',
+    alignItems: 'center', gap: '10px',
   },
   scoreLabel: {
-    fontSize: '11px',
-    color:    'var(--text-muted)',
+    fontSize: '12px', fontWeight: 600,
   },
   scoreVal: {
-    fontSize:   '16px',
-    fontWeight: 600,
-    color:      'var(--text-primary)',
+    fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)',
+    textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+  },
+  scoreBar: {
+    height: '5px', background: 'var(--bg-active)',
+    borderRadius: '3px', overflow: 'hidden',
+  },
+  scoreBarFill: {
+    height: '100%', borderRadius: '3px', transition: 'width 0.4s ease',
   },
   iterRow: {
-    display:    'flex',
-    alignItems: 'center',
-    gap:        '8px',
-    fontSize:   '12px',
-    padding:    '4px 0',
-    borderBottom:'1px solid var(--border)',
+    display: 'flex', alignItems: 'center', gap: '8px',
+    fontSize: '12px', padding: '4px 0',
+    borderBottom: '1px solid var(--border)',
   },
-  iterNum: {
-    color:     'var(--text-muted)',
-    flexShrink:0,
-    width:     '20px',
+  iterNum:  { color: 'var(--text-muted)', flexShrink: 0, width: '22px' },
+  iterBadge: {
+    display: 'inline-flex', alignItems: 'center', gap: '3px',
+    padding: '1px 8px', borderRadius: '10px',
+    fontSize: '11px', fontWeight: 600, flexShrink: 0,
   },
-  iterLabel: (label) => ({
-    padding:      '1px 8px',
-    borderRadius: '10px',
-    fontSize:     '11px',
-    fontWeight:   600,
-    flexShrink:   0,
-    color:        label === 'SUPPORTED' ? 'var(--status-supported)'
-                : label === 'PARTIAL'   ? 'var(--status-partial)'
-                : 'var(--text-muted)',
-    background:   label === 'SUPPORTED' ? 'rgba(34,197,94,0.1)'
-                : label === 'PARTIAL'   ? 'rgba(245,158,11,0.1)'
-                : 'var(--bg-active)',
-  }),
-  iterConf: {
-    color:     'var(--text-secondary)',
-    flexShrink:0,
-    width:     '44px',
-  },
+  iterConf: { color: 'var(--text-secondary)', flexShrink: 0, width: '44px' },
   iterQ: {
-    color:    'var(--text-muted)',
-    overflow: 'hidden',
-    textOverflow:'ellipsis',
-    whiteSpace: 'nowrap',
-    flex:     1,
+    color: 'var(--text-muted)', overflow: 'hidden',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
   },
   sourceRow: {
-    display:    'flex',
-    alignItems: 'baseline',
-    gap:        '8px',
-    fontSize:   '13px',
-    padding:    '3px 0',
+    display: 'flex', alignItems: 'baseline', gap: '8px',
+    fontSize: '13px', padding: '3px 0',
   },
-  sourceNum: {
-    color:     'var(--accent-light)',
-    fontWeight:600,
-    flexShrink:0,
-    width:     '18px',
-  },
-  sourceTitle: {
-    color: 'var(--text-secondary)',
-  },
+  sourceNum:   { color: 'var(--accent-light)', fontWeight: 600, flexShrink: 0, width: '18px' },
+  sourceTitle: { color: 'var(--text-secondary)' },
 }

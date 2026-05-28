@@ -59,7 +59,9 @@ from Stage_3_Adaptive_Retrieval import (
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
-DEVICE         = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE         = ("cuda" if torch.cuda.is_available()
+                  else "mps" if torch.backends.mps.is_available()
+                  else "cpu")
 MAX_ITERATIONS = 3        # maximum re-retrieval attempts before abstaining
 CONFIDENCE_THRESHOLD = 0.50          # minimum confidence to accept a SUPPORTED verdict
 PARTIAL_ACCEPTANCE_THRESHOLD = 0.50  # accept PARTIAL if confidence ≥ 0.50 — the verifier
@@ -133,61 +135,6 @@ def reformulate_query(original_query, iteration, retrieved_passages, answer):
         elif entities:
             return f"{entities[0]} {suffix}"
         return original_query + " facts details"
-
-
-# ─────────────────────────────────────────────
-# SELF-CONSISTENCY CHECK
-# Used to validate high-confidence PARTIAL answers before accepting them.
-# Catches cases where the LLM answer is confidently wrong (e.g. entity
-# names swapped in a comparison: "Coldplay formed first" when Radiohead was).
-# ─────────────────────────────────────────────
-def _self_consistency_check(query, answer, context_passages, num_checks=2):
-    """
-    Asks the LLM to re-answer the question from the same context independently,
-    then checks whether the new answer is consistent with the original.
-    Returns True if consistent, False if contradictory.
-
-    Uses a strict yes/no prompt to minimise token cost.
-    """
-    import ollama as _ollama
-
-    context_text = "\n\n".join(
-        f"[{p['title']}]: {p['text'][:400]}" for p in context_passages[:5]
-    )
-
-    # Step 1: ask for an independent re-answer
-    recheck_prompt = (
-        f"Context:\n{context_text}\n\n"
-        f"Question: {query}\n\n"
-        f"Based ONLY on the context above, give a concise answer in one sentence."
-    )
-    try:
-        # temperature=0.7 introduces variance so the re-answer is genuinely
-        # independent from the original; temperature=0 (default) would reproduce
-        # the same answer from the same context, making this check a no-op.
-        recheck_resp = _ollama.generate(
-            model=OLLAMA_MODEL,
-            prompt=recheck_prompt,
-            options={"temperature": 0.7},
-        )
-        recheck_answer = recheck_resp["response"].strip()
-    except Exception:
-        # If the LLM call fails, be conservative and reject
-        return False
-
-    # Step 2: ask the LLM if the two answers are consistent
-    consistency_prompt = (
-        f"Answer A: {answer}\n"
-        f"Answer B: {recheck_answer}\n\n"
-        f"Do Answer A and Answer B convey the same factual claim? "
-        f"Reply with exactly one word: YES or NO."
-    )
-    try:
-        cons_resp = _ollama.generate(model=OLLAMA_MODEL, prompt=consistency_prompt)
-        verdict = cons_resp["response"].strip().upper()
-        return verdict.startswith("YES")
-    except Exception:
-        return False
 
 
 # ─────────────────────────────────────────────
@@ -307,68 +254,33 @@ def agentic_query(query, index, embedder, passages,
                 "iteration_log":  iteration_log,
             }
 
-        elif label == "PARTIAL" and confidence >= (
-            COMPARISON_PARTIAL_THRESHOLD if query_type == "COMPARISON"
-            else PARTIAL_ACCEPTANCE_THRESHOLD
-        ):
-            # ⚠️ High-confidence PARTIAL: answer is related to the evidence but
-            # inferred/synthesised (e.g. comparing birth years) rather than verbatim.
-            # Before accepting, run a self-consistency check: ask the LLM to verify
-            # its own answer against the retrieved context. This catches cases where
-            # the answer is confidently wrong (e.g. entities swapped in a comparison).
-            if verbose:
-                print(f"  Running self-consistency check on PARTIAL answer...")
-            consistent = _self_consistency_check(query, answer, context_passages)
-            if consistent:
-                if verbose:
-                    print(f"\n✅ PARTIAL accepted after self-consistency check "
-                          f"(verifier: {confidence:.4f}).")
-                return {
-                    "query":          query,
-                    "query_type":     query_type,
-                    "answer":         answer,
-                    "status":         "PARTIAL",
-                    "iterations":     iteration,
-                    "abstained":      False,
-                    "verification":   verification,
-                    "iteration_log":  iteration_log,
-                }
-            else:
-                if verbose:
-                    print(f"  Self-consistency check FAILED — answer contradicts context.")
-                # Treat as unverified; reformulate if iterations remain
-                if iteration < MAX_ITERATIONS:
-                    if verbose:
-                        print(f"  Reformulating query for iteration {iteration+1}...")
-                    current_query = reformulate_query(
-                        query, iteration, retrieved, answer
-                    )
-                    continue
-
         elif iteration < MAX_ITERATIONS:
-            # ⚠️ Answer not verified — reformulate and retry
+            # PARTIAL and UNSUPPORTED both trigger reformulation (report Section 6.3.6):
+            # "the agent is programmed to reformulate the query and trigger additional
+            #  retrieval steps rather than returning a hallucinated answer"
             if verbose:
-                print(f"Answer not verified. Reformulating query for iteration {iteration+1}...")
+                print(f"Answer not verified ({label}). Reformulating for iteration {iteration+1}...")
             current_query = reformulate_query(
                 query, iteration, retrieved, answer
             )
 
         # else: MAX_ITERATIONS reached → fall through to abstention
 
-    # ── FALLBACK: return best answer found rather than abstaining ──
+    # ── ABSTAIN: no verified answer after MAX_ITERATIONS (proposal Section 2.6, 4.3) ──
+    # "when the iteration count exceeds a maximum Tmax, at which point the system
+    #  abstains rather than returning an unverified answer" — proposal Section 2.6
     if verbose:
-        print(f"\n⚠️  Could not fully verify after {MAX_ITERATIONS} iterations.")
-        print(f"Returning best available answer "
-              f"(verifier: {best_candidate['label']} {best_candidate['confidence']:.4f}).")
+        print(f"\n❌ Could not verify an answer after {MAX_ITERATIONS} iterations.")
+        print("Abstaining — returning explicit 'insufficient evidence' response.")
 
     return {
         "query":         query,
         "query_type":    query_type,
-        "answer":        best_candidate["answer"],
-        "status":        "BEST_EFFORT",
+        "answer":        "I cannot confidently answer this question based on the available evidence.",
+        "status":        "ABSTAINED",
         "iterations":    MAX_ITERATIONS,
-        "abstained":     False,
-        "verification":  best_candidate["verification"],
+        "abstained":     True,
+        "verification":  best_candidate["verification"] if best_candidate else {},
         "iteration_log": iteration_log,
     }
 
@@ -427,12 +339,30 @@ def routed_query(query, index, embedder, passages,
         context_text = " ".join(p["text"] for p in reranked[:5])
         verification = verify(context_text, answer, verifier_model, verifier_tokenizer)
 
+        label = verification["label"]
+        conf  = verification["confidence"]
+
         if verbose:
-            label = verification["label"]
-            conf  = verification["confidence"]
             icon  = {"SUPPORTED": "✅", "PARTIAL": "⚠️", "UNSUPPORTED": "❌"}.get(label, "?")
             print(f"[Router] Answer: {answer}")
             print(f"[Router] Verification: {icon} {label} ({conf:.4f})")
+
+        # Abstain if the answer is entirely unsupported by retrieved context.
+        # PARTIAL is returned (best available in a single-pass route) and counted
+        # as a hallucination in metrics per proposal Section 6.3.6.1.
+        if label == "UNSUPPORTED":
+            if verbose:
+                print("[Router] UNSUPPORTED — abstaining.")
+            return {
+                "query":          query,
+                "query_type":     query_type,
+                "answer":         "I cannot confidently answer this question based on the available evidence.",
+                "status":         "ABSTAINED",
+                "iterations":     1,
+                "abstained":      True,
+                "verification":   verification,
+                "iteration_log":  [],
+            }
 
         return {
             "query":          query,
@@ -513,8 +443,17 @@ def evaluate_all_stages(index, embedder, passages,
             verbose=False
         )
         s4_answer  = s4_result["answer"]
-        s4_abstain = 0  # no abstentions — system always returns best available answer
-        s4_halluc  = 0 if s4_result["status"] in ("SUPPORTED", "PARTIAL") else 1
+        # Read actual abstention flag from the result (proposal Section 6.3.6.1)
+        s4_abstain = 1 if s4_result.get("abstained") else 0
+        # Hallucination: PARTIAL/UNSUPPORTED answers count as hallucinations per
+        # proposal Equation 6.7. Abstained queries do NOT count as hallucinations
+        # (no answer was returned).
+        if s4_result.get("abstained"):
+            s4_halluc = 0
+        elif s4_result["status"] == "SUPPORTED":
+            s4_halluc = 0
+        else:
+            s4_halluc = 1
 
         # ── Exact Match scores ──
         s1_em = exact_match(s1_answer, gold)
@@ -580,7 +519,9 @@ def evaluate_all_stages(index, embedder, passages,
     reduction = (s1_h - s4_h) / s1_h * 100 if s1_h > 0 else 0
     print(f"  Hallucination reduced from {s1_h:.4f} (Stage1) "
           f"to {s4_h:.4f} (Stage4) = {reduction:.1f}% reduction")
-    print(f"  Coverage: 100% (no abstentions — system always returns best available answer)")
+    s4_abs = summary["stage4"]["abstention_rate"]
+    print(f"  Stage 4 abstention rate: {s4_abs:.4f} "
+          f"(system abstains rather than hallucinating — proposal Section 4.3)")
 
     # Save
     with open("stage4_full_results.json", "w") as f:

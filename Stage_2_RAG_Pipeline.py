@@ -1,17 +1,15 @@
 """
-Stage 2: RAG Pipeline with Hallucination Detection & Faithfulness Scoring
-=========================================================================
+Stage 2: RAG Pipeline with Faithfulness Verifier
+=================================================
 Project: HARA — Hallucination-Aware Retrieval Agent
 Dataset: HotpotQA
 LLM: Ollama (local)
 Retrieval: FAISS + sentence-transformers
 
 What's new in Stage 2 vs Stage 1:
-  - Faithfulness scoring: LLM rates how well answer is grounded in context (0.0–1.0)
-  - Confidence estimation: LLM expresses its own certainty about the answer
-  - Fallback mechanism: low-scoring answers trigger a conservative re-prompt
-  - Richer evaluation: logs EM + faithfulness + confidence per sample
-  - Stage comparison: side-by-side metrics vs Stage 1 baseline
+  - Faithfulness Verifier: DistilBERT transformer classifies answers as
+    SUPPORTED / PARTIAL / UNSUPPORTED based on retrieved context
+  - Adds hallucination detection over the Stage 1 baseline
 """
 
 import json
@@ -24,6 +22,8 @@ from tqdm import tqdm
 import ollama
 import pickle
 import os
+
+from Stage_2_Verifier_GPU import verify
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -278,11 +278,13 @@ def _parse_field(text, key):
 # ─────────────────────────────────────────────
 # STEP 8 (NEW): FULL STAGE 2 PIPELINE
 # ─────────────────────────────────────────────
-def rag_query_stage2(query, index, embedder, passages, verbose=True):
+def rag_query_stage2(query, index, embedder, passages,
+                     verifier_model=None, verifier_tokenizer=None,
+                     verbose=True):
     """
-    Full Stage 2 pipeline:
-      Query → Embed → Retrieve → Generate → Score Faithfulness
-           → Estimate Confidence → Fallback if needed → Return
+    Stage 2 pipeline (report Section 6.3.2):
+      Query → Retrieve (FAISS) → Generate (LLM) → Verify (DistilBERT)
+                                                 → SUPPORTED / PARTIAL / UNSUPPORTED
     """
     if verbose:
         print(f"\n{'='*60}")
@@ -296,56 +298,38 @@ def rag_query_stage2(query, index, embedder, passages, verbose=True):
         for i, p in enumerate(retrieved):
             print(f"  [{i+1}] {p['title']} (score: {p['score']:.4f})")
 
-    # 2. Generate initial answer
+    # 2. Generate answer
     if verbose:
         print("\nGenerating answer...")
     answer = generate_answer(query, retrieved)
     if verbose:
-        print(f"\nInitial Answer: {answer}")
+        print(f"\nAnswer: {answer}")
 
-    # 3. Score faithfulness
-    if verbose:
-        print("\nScoring faithfulness...")
-    faithfulness, faith_reason = score_faithfulness(query, answer, retrieved)
-    if verbose:
-        print(f"  Faithfulness: {faithfulness:.2f} — {faith_reason}")
+    # 3. Verify with DistilBERT faithfulness verifier
+    if verifier_model is None or verifier_tokenizer is None:
+        raise RuntimeError(
+            "Verifier not loaded. Run: python Stage_2_Verifier_GPU.py --mode train"
+        )
+    context = " ".join(p["text"] for p in retrieved)
+    verification = verify(context, answer, verifier_model, verifier_tokenizer)
+    label      = verification["label"]
+    confidence = verification["confidence"]
+    scores     = verification["scores"]
 
-    # 4. Estimate confidence
     if verbose:
-        print("Estimating confidence...")
-    confidence, conf_rationale = estimate_confidence(query, answer, retrieved)
-    if verbose:
-        print(f"  Confidence:   {confidence:.2f} — {conf_rationale}")
-
-    # 5. Fallback if faithfulness is too low
-    used_fallback = False
-    if faithfulness < FAITHFULNESS_THRESHOLD:
-        if verbose:
-            print(f"\n⚠  Faithfulness {faithfulness:.2f} < threshold {FAITHFULNESS_THRESHOLD}. Triggering fallback...")
-        answer = generate_fallback_answer(query, retrieved)
-        used_fallback = True
-        if verbose:
-            print(f"\nFallback Answer: {answer}")
-
-    # 6. Final verdict
-    is_low_confidence = confidence < CONFIDENCE_THRESHOLD
-    if verbose:
-        if is_low_confidence:
-            print(f"\n⚠  Low confidence ({confidence:.2f}). Answer may be uncertain.")
-        print(f"\n{'='*60}")
-        print(f"Final Answer: {answer}")
-        print(f"Faithfulness: {faithfulness:.2f} | Confidence: {confidence:.2f} | Fallback used: {used_fallback}")
+        icon = {"SUPPORTED": "✅", "PARTIAL": "⚠️", "UNSUPPORTED": "❌"}.get(label, "?")
+        print(f"\nVerification: {icon} {label} (confidence: {confidence:.4f})")
+        print(f"  Scores → SUPPORTED: {scores['SUPPORTED']:.4f} | "
+              f"PARTIAL: {scores['PARTIAL']:.4f} | "
+              f"UNSUPPORTED: {scores['UNSUPPORTED']:.4f}")
         print('='*60)
 
     return {
-        "query":              query,
-        "answer":             answer,
-        "faithfulness_score": faithfulness,
-        "faithfulness_reason":faith_reason,
-        "confidence_score":   confidence,
-        "confidence_rationale":conf_rationale,
-        "used_fallback":      used_fallback,
-        "low_confidence_flag":is_low_confidence,
+        "query":             query,
+        "answer":            answer,
+        "label":             label,
+        "confidence":        confidence,
+        "scores":            scores,
         "retrieved_passages": retrieved,
     }
 

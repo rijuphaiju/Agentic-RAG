@@ -56,7 +56,9 @@ from Stage_2_Verifier_GPU import load_verifier, verify, VERIFIER_PATH
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
-DEVICE      = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE      = ("cuda" if torch.cuda.is_available()
+               else "mps" if torch.backends.mps.is_available()
+               else "cpu")
 TOP_K       = 10       # passages per retrieval call
 TOP_K_MULTI = 5        # passages per hop in multi-hop retrieval
 MAX_HOPS    = 3        # maximum hops for multi-hop retrieval

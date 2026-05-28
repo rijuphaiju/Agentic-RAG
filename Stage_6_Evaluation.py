@@ -52,9 +52,7 @@ from Stage_3_Adaptive_Retrieval import (
 )
 from Stage_4_Agentic_Loop import (
     agentic_query,
-    routed_query,
     MAX_ITERATIONS, CONFIDENCE_THRESHOLD,
-    PARTIAL_ACCEPTANCE_THRESHOLD, COMPARISON_PARTIAL_THRESHOLD,
 )
 
 OUTPUT_FILE = "evaluation_results.json"
@@ -138,14 +136,12 @@ def _print_run_header(num_samples):
           f"ollama={OLLAMA_MODEL}, top_k={S1_TOP_K}")
     print(f"  Stage 3 : top_k={TOP_K}, max_hops={MAX_HOPS}, "
           f"multi_hop_patterns={len(MULTI_HOP_PATTERNS)}")
-    print(f"  Stage 4 : max_iter={MAX_ITERATIONS}, conf_thresh={CONFIDENCE_THRESHOLD}, "
-          f"partial_thresh={PARTIAL_ACCEPTANCE_THRESHOLD}, "
-          f"comparison_partial={COMPARISON_PARTIAL_THRESHOLD}")
+    print(f"  Stage 4 : max_iter={MAX_ITERATIONS}, conf_thresh={CONFIDENCE_THRESHOLD}")
     bm25_status = "ON" if _BM25_AVAILABLE else "OFF (pip install rank-bm25)"
     print(f"  Retrieval: SIMPLE=BM25+dense hybrid ({bm25_status}, alpha=0.5)")
     print(f"           : MULTI_HOP=BM25+dense iterative (3 hops)")
     print(f"           : COMPARISON=dense-only per-entity (BM25 excluded — hurts entity lookup)")
-    print(f"  Stage 4 : ROUTING — COMPARISON→Stage4 agentic, MULTI_HOP/SIMPLE→Stage3")
+    print(f"  Stage 4 : Full agentic loop (all query types) with query complexity classification")
     print(f"  Stage 1 : MULTI_HOP chain-of-thought prompt=ON")
     print(f"  Stage 1 : copula answer shortening=ON (\"X is Y\" → \"Y\" when ≤5 tokens)")
     print(f"  Eval    : alias_normalization=ON (US/UK/NYC/number-words)")
@@ -229,23 +225,23 @@ def run_stage1(q, index, embedder, passages, vm, vt):
     answer    = generate_answer(q, retrieved)
     context   = " ".join(p["text"] for p in retrieved[:5])
     label     = verify(context, answer, vm, vt)["label"]
+    # Hallucination = PARTIAL or UNSUPPORTED per proposal Equation 6.7
     return {
         "answer":       answer,
         "abstained":    is_abstention(answer),
-        "hallucinated": label == "UNSUPPORTED",
+        "hallucinated": label in ("PARTIAL", "UNSUPPORTED"),
         "query_type":   None,
     }
 
 
 def run_stage2(q, index, embedder, passages, vm, vt):
-    result  = rag_query_stage2(q, index, embedder, passages, verbose=False)
-    answer  = result["answer"]
-    context = " ".join(p["text"] for p in result["retrieved_passages"][:5])
-    label   = verify(context, answer, vm, vt)["label"]
+    result = rag_query_stage2(q, index, embedder, passages, vm, vt, verbose=False)
+    label  = result["label"]
+    # Hallucination = PARTIAL or UNSUPPORTED per proposal Equation 6.7
     return {
-        "answer":       answer,
-        "abstained":    is_abstention(answer),
-        "hallucinated": label == "UNSUPPORTED",
+        "answer":       result["answer"],
+        "abstained":    is_abstention(result["answer"]),
+        "hallucinated": label in ("PARTIAL", "UNSUPPORTED"),
         "query_type":   None,
     }
 
@@ -286,24 +282,27 @@ def run_stage3(q, index, embedder, passages, vm, vt):
     answer  = generate_answer(q, gen_passages, query_type=qtype)
     context = " ".join(p["text"] for p in reranked[:5])
     label   = verify(context, answer, vm, vt)["label"]
+    # Hallucination = PARTIAL or UNSUPPORTED per proposal Equation 6.7
     return {
         "answer":       answer,
         "abstained":    is_abstention(answer),
-        "hallucinated": label == "UNSUPPORTED",
+        "hallucinated": label in ("PARTIAL", "UNSUPPORTED"),
         "query_type":   qtype,
     }
 
 
 def run_stage4(q, index, embedder, passages, vm, vt):
-    # Routing layer: COMPARISON → Stage 4 agentic loop; MULTI_HOP/SIMPLE → Stage 3.
-    # Based on Run 3 empirical results: Stage 4 wins on COMPARISON (0.4451 vs 0.3991),
-    # Stage 3 wins on MULTI_HOP (0.1543 vs 0.0884) and is safer for SIMPLE.
-    result = routed_query(q, index, embedder, passages, vm, vt, verbose=False)
-    label = result["verification"]["label"]
+    # Full agentic loop: classifies query complexity internally and runs
+    # iterative retrieve→generate→verify with principled abstention.
+    result    = agentic_query(q, index, embedder, passages, vm, vt, verbose=False)
+    label     = result["verification"].get("label", "UNSUPPORTED")
+    abstained = result.get("abstained", False)
+    # Hallucination rate per proposal Equation 6.7: PARTIAL and UNSUPPORTED both
+    # count as hallucinations. Abstained queries do NOT count (no answer returned).
     return {
         "answer":       result["answer"],
-        "abstained":    False,
-        "hallucinated": label == "UNSUPPORTED",
+        "abstained":    abstained,
+        "hallucinated": (not abstained) and (label in ("PARTIAL", "UNSUPPORTED")),
         "query_type":   result["query_type"],
     }
 
@@ -446,14 +445,11 @@ def evaluate(num_samples: int = 50):
             "max_hops":        MAX_HOPS,
             "max_iterations":  MAX_ITERATIONS,
             "conf_threshold":  CONFIDENCE_THRESHOLD,
-            "partial_thresh":  PARTIAL_ACCEPTANCE_THRESHOLD,
-            "comparison_partial_thresh": COMPARISON_PARTIAL_THRESHOLD,
             "features": {
-                "multi_hop_cot_prompt":      True,
-                "simple_early_exit":         True,
-                "simple_skip_self_consist":  True,
-                "stage3_reranking":          True,
-                "alias_normalization":       True,
+                "multi_hop_cot_prompt":  True,
+                "simple_early_exit":     True,
+                "stage3_reranking":      True,
+                "alias_normalization":   True,
             },
         },
         "num_samples":  num_samples,
