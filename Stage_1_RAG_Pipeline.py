@@ -32,7 +32,7 @@ EMBED_MODEL    = "all-MiniLM-L6-v2"
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 OLLAMA_MODEL   = "llama3.2"
 TOP_K          = 10
-MAX_PASSAGES   = 150000
+MAX_PASSAGES   = 500000  # full HotpotQA train split has 482,021 unique passages
 INDEX_PATH     = "faiss_index.bin"
 PASSAGES_PATH  = "passages.pkl"
 
@@ -444,12 +444,17 @@ def generate_answer(query, retrieved_passages, model=OLLAMA_MODEL, query_type=No
         num_predict = 120
 
     else:
-        # Unknown type — allow a short sentence since reasoning is needed.
+        # Stage 1 baseline — always produce an answer.
+        # Do NOT restrict to context-only: the LLM should answer from context when
+        # possible, and fall back to general knowledge otherwise. This is what
+        # produces hallucinations in Stage 1, establishing the baseline that
+        # motivates Stages 2–4. Never refuse.
         prompt = (
-            f"You are a precise question-answering assistant. "
-            f"Answer using ONLY the provided context.\n"
-            f"Give a direct answer in 1-2 sentences. "
-            f"Do NOT start with 'Based on' or 'According to'.\n\n"
+            f"You are a question-answering assistant. "
+            f"Use the provided context to answer. "
+            f"If the context lacks the answer, use your general knowledge to give your best answer.\n"
+            f"Give a direct, concise answer in 1-2 sentences. "
+            f"Never say 'I don't know', 'I couldn't find', or refuse to answer.\n\n"
             f"Context:\n{context}\n\n"
             f"Question: {query}\n\n"
             f"Final Answer:"

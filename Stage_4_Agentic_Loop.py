@@ -54,6 +54,8 @@ from Stage_3_Adaptive_Retrieval import (
     retrieve_multi_hop,
     retrieve_comparison,
     TOP_K,
+    _RETRIEVAL_PARAMS,
+    _DEFAULT_PARAMS,
 )
 
 # ─────────────────────────────────────────────
@@ -62,7 +64,7 @@ from Stage_3_Adaptive_Retrieval import (
 DEVICE         = ("cuda" if torch.cuda.is_available()
                   else "mps" if torch.backends.mps.is_available()
                   else "cpu")
-MAX_ITERATIONS = 3        # maximum re-retrieval attempts before abstaining
+MAX_ITERATIONS = 5        # maximum re-retrieval attempts before abstaining
 CONFIDENCE_THRESHOLD = 0.50          # minimum confidence to accept a SUPPORTED verdict
 PARTIAL_ACCEPTANCE_THRESHOLD = 0.50  # accept PARTIAL if confidence ≥ 0.50 — the verifier
                                      # rarely gives > 0.62 for correct multi-hop answers;
@@ -142,7 +144,7 @@ def reformulate_query(original_query, iteration, retrieved_passages, answer):
 # ─────────────────────────────────────────────
 def agentic_query(query, index, embedder, passages,
                   verifier_model, verifier_tokenizer,
-                  verbose=True):
+                  verbose=True, query_type_override=None, level_override=None):
     """
     Full agentic RAG pipeline with self-correction loop.
 
@@ -161,15 +163,26 @@ def agentic_query(query, index, embedder, passages,
         print(f"Query: {query}")
         print(f"{'='*60}")
 
-    query_type      = classify_query(query)
+    # Use ground-truth type from dataset when available (evaluation), else regex (live chat)
+    if query_type_override == "bridge":
+        query_type = "MULTI_HOP"
+    elif query_type_override == "comparison":
+        query_type = "COMPARISON"
+    else:
+        query_type = classify_query(query)
     current_query   = query
     all_retrieved   = []
     iteration_log   = []
     best_candidate  = None   # best (answer, label, confidence) seen across all iterations
     _label_rank     = {"SUPPORTED": 2, "PARTIAL": 1, "UNSUPPORTED": 0}
 
+    level = level_override or "medium"
+    r_top_k, r_max_hops = _RETRIEVAL_PARAMS.get(
+        (query_type, level), _DEFAULT_PARAMS[query_type]
+    )
+
     if verbose:
-        print(f"Query type: {query_type}")
+        print(f"Query type: {query_type} | Level: {level} | top_k={r_top_k}, max_hops={r_max_hops}")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         if verbose:
@@ -177,13 +190,16 @@ def agentic_query(query, index, embedder, passages,
             if iteration > 1:
                 print(f"Reformulated query: {current_query}")
 
-        # ── RETRIEVAL (adaptive based on query type) ──
+        # ── RETRIEVAL (adaptive based on query type × level) ──
         if query_type == "COMPARISON":
-            retrieved = retrieve_comparison(current_query, index, embedder, passages)
+            retrieved = retrieve_comparison(current_query, index, embedder, passages,
+                                            top_k=r_top_k)
         elif query_type == "MULTI_HOP":
-            retrieved = retrieve_multi_hop(current_query, index, embedder, passages)
+            retrieved = retrieve_multi_hop(current_query, index, embedder, passages,
+                                           top_k=r_top_k, max_hops=r_max_hops)
         else:
-            retrieved = retrieve_simple(current_query, index, embedder, passages)
+            retrieved = retrieve_simple(current_query, index, embedder, passages,
+                                        top_k=r_top_k)
 
         # Merge with previously retrieved passages (Ct-1 ∪ {dt})
         seen_titles = {p["title"] for p in all_retrieved}

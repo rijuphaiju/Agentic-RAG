@@ -366,9 +366,14 @@ def train(model, train_loader, val_loader):
 # STEP 6: INFERENCE API
 # 
 def load_verifier(model_path=VERIFIER_PATH):
-    checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
-    model      = FaithfulnessVerifier().to(DEVICE)
-    model.load_state_dict(checkpoint["model_state"])
+    checkpoint   = torch.load(model_path, map_location=DEVICE, weights_only=False)
+    model        = FaithfulnessVerifier().to(DEVICE)
+    state_dict   = checkpoint["model_state"]
+    # torch.compile() prefixes all keys with "_orig_mod." — strip it when loading
+    # without compile so the model loads correctly regardless of how it was saved.
+    if any(k.startswith("_orig_mod.") for k in state_dict):
+        state_dict = {k.replace("_orig_mod.", "", 1): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
     model.eval()
     bert_tokenizer = DistilBertTokenizerFast.from_pretrained(BERT_MODEL)
     print(f"Verifier loaded from {model_path} "

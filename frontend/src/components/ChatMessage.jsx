@@ -23,7 +23,7 @@ function deriveMetrics(stage, meta) {
     return {
       label:        null,
       confidence:   null,
-      hallucinated: null,   // unknown — no verifier in Stage 1
+      hallucinated: null,   // Stage 1 has no verifier — hallucination is undetected
       abstained:    false,
       query_type:   null,
       iterations:   null,
@@ -159,11 +159,11 @@ function MetricsPanel({ stage, metrics, meta, open, onToggle }) {
 function buildMetricRows(stage, metrics, meta) {
   const rows = []
 
-  // Verifier Label
+  // Verifier Label — not applicable for Stage 1 (verifier introduced in Stage 2)
   if (stage === 'stage1') {
     rows.push({
       label:   'Verifier Label',
-      valueEl: <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>N/A — no verification (baseline)</span>,
+      valueEl: <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>N/A — no verifier in Stage 1</span>,
     })
   } else {
     const lbl = metrics.label || 'UNKNOWN'
@@ -203,6 +203,27 @@ function buildMetricRows(stage, metrics, meta) {
     })
   }
 
+  // Retrieval Strategy — Stage 3 only
+  if (stage === 'stage3' && meta.retrieval_strategy) {
+    const cfg = QTYPE_CFG[meta.query_type] || {}
+    rows.push({
+      label:   'Retrieval Strategy',
+      valueEl: (
+        <span style={{ color: cfg.color || 'var(--text-secondary)', fontSize: '12px', fontWeight: 500 }}>
+          {meta.retrieval_strategy}
+        </span>
+      ),
+    })
+  }
+
+  // Passages Retrieved — Stage 3 only
+  if (stage === 'stage3' && meta.num_retrieved != null) {
+    rows.push({
+      label: 'Passages Retrieved',
+      valueEl: <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{meta.num_retrieved}</span>,
+    })
+  }
+
   // Iterations (Stage 4)
   if (metrics.iterations !== null && metrics.iterations !== undefined) {
     rows.push({
@@ -217,15 +238,42 @@ function buildMetricRows(stage, metrics, meta) {
     })
   }
 
-  // Hallucination
-  rows.push({
-    label:   'Hallucination',
-    valueEl: metrics.hallucinated === null
-      ? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>Unknown (no verifier)</span>
-      : metrics.hallucinated
-        ? <span style={{ color: '#ef4444', fontWeight: 600 }}>Yes — answer not fully supported</span>
-        : <span style={{ color: '#22c55e', fontWeight: 600 }}>No — answer is grounded</span>,
-  })
+  // Hallucination probability from verifier scores
+  const scores = meta?.scores || meta?.verification_scores || {}
+  const hallProb = ((scores.PARTIAL || 0) + (scores.UNSUPPORTED || 0)) * 100
+  if (Object.keys(scores).length > 0) {
+    const hColor = hallProb >= 50 ? '#ef4444' : hallProb >= 25 ? '#f59e0b' : '#22c55e'
+    rows.push({
+      label:   'Hallucination Probability',
+      valueEl: <span style={{ color: hColor, fontWeight: 600 }}>{hallProb.toFixed(1)}%</span>,
+    })
+  } else if (metrics.hallucinated === null) {
+    rows.push({
+      label:   'Hallucination',
+      valueEl: <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>Unknown (no verifier)</span>,
+    })
+  }
+
+  // EM and F1 against gold answer (only when question is from HotpotQA)
+  if (meta?.eval) {
+    const ev = meta.eval
+    rows.push({
+      label:   'Exact Match',
+      valueEl: <span style={{ color: ev.em === 1 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+        {ev.em === 1 ? '✓ Yes' : '✕ No'}
+      </span>,
+    })
+    rows.push({
+      label:   'F1 Score',
+      valueEl: <span style={{ color: ev.f1 >= 0.7 ? '#22c55e' : ev.f1 >= 0.3 ? '#f59e0b' : '#ef4444', fontWeight: 600 }}>
+        {(ev.f1 * 100).toFixed(1)}%
+      </span>,
+    })
+    rows.push({
+      label:   'Gold Answer',
+      valueEl: <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>{ev.gold_answer}</span>,
+    })
+  }
 
   // Abstention Rate
   if (stage === 'stage1') {
@@ -251,7 +299,7 @@ function buildMetricRows(stage, metrics, meta) {
   if (stage === 'stage1') {
     rows.push({
       label:   'Macro F1',
-      valueEl: <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>N/A — requires verifier classification</span>,
+      valueEl: <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '12px' }}>N/A — no query type classification in Stage 1</span>,
     })
   }
 

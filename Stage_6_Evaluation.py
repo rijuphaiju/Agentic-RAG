@@ -246,17 +246,25 @@ def run_stage2(q, index, embedder, passages, vm, vt):
     }
 
 
-def run_stage3(q, index, embedder, passages, vm, vt):
-    qtype         = classify_query(q)
+def run_stage3(q, index, embedder, passages, vm, vt, hotpot_type=None, hotpot_level=None):
+    # Use dataset ground-truth type when available; fall back to regex for live queries
+    if hotpot_type == "bridge":
+        qtype = "MULTI_HOP"
+    elif hotpot_type == "comparison":
+        qtype = "COMPARISON"
+    else:
+        qtype = classify_query(q)
     bridge_passage = None
 
+    from Stage_3_Adaptive_Retrieval import _RETRIEVAL_PARAMS, _DEFAULT_PARAMS
+    level = hotpot_level or "medium"
+    r_top_k, r_max_hops = _RETRIEVAL_PARAMS.get((qtype, level), _DEFAULT_PARAMS[qtype])
+
     if qtype == "COMPARISON":
-        retrieved = retrieve_comparison(q, index, embedder, passages)
+        retrieved = retrieve_comparison(q, index, embedder, passages, top_k=r_top_k)
     elif qtype == "MULTI_HOP":
-        # Decomposed 2-sub-question strategy: SQ2 retrieval is independent of
-        # the bridge answer, so a wrong bridge degrades context but never
-        # misdirects retrieval. Bridge context is injected after reranking.
-        retrieved, bridge_ctx = decompose_and_retrieve_multi_hop(q, index, embedder, passages)
+        retrieved, bridge_ctx = decompose_and_retrieve_multi_hop(q, index, embedder, passages,
+                                                                  top_k=r_top_k)
         if bridge_ctx:
             bridge_passage = {
                 "title": "Intermediate Finding",
@@ -265,7 +273,7 @@ def run_stage3(q, index, embedder, passages, vm, vt):
                 "hop":   0,
             }
     else:
-        retrieved = retrieve_simple(q, index, embedder, passages)
+        retrieved = retrieve_simple(q, index, embedder, passages, top_k=r_top_k)
 
     pool     = retrieved[:TOP_K * 2] if len(retrieved) > TOP_K else retrieved
     reranked = rerank_passages(q, pool, top_k=TOP_K)
@@ -291,10 +299,10 @@ def run_stage3(q, index, embedder, passages, vm, vt):
     }
 
 
-def run_stage4(q, index, embedder, passages, vm, vt):
-    # Full agentic loop: classifies query complexity internally and runs
-    # iterative retrieve→generate→verify with principled abstention.
-    result    = agentic_query(q, index, embedder, passages, vm, vt, verbose=False)
+def run_stage4(q, index, embedder, passages, vm, vt, hotpot_type=None, hotpot_level=None):
+    result    = agentic_query(q, index, embedder, passages, vm, vt, verbose=False,
+                              query_type_override=hotpot_type,
+                              level_override=hotpot_level)
     label     = result["verification"].get("label", "UNSUPPORTED")
     abstained = result.get("abstained", False)
     # Hallucination rate per proposal Equation 6.7: PARTIAL and UNSUPPORTED both
@@ -389,12 +397,16 @@ def evaluate(num_samples: int = 50):
     for i, ex in enumerate(tqdm(dataset, total=num_samples, desc="Questions")):
         if i >= num_samples:
             break
-        q    = ex["question"]
-        gold = ex["answer"]
+        q            = ex["question"]
+        gold         = ex["answer"]
+        hotpot_type  = ex.get("type")    # "bridge" or "comparison"
+        hotpot_level = ex.get("level")   # "easy", "medium", "hard"
 
         for stage_label, fn, records, has_qt in RUNNERS:
             try:
-                out         = fn(q, index, embedder, passages, vm, vt)
+                out = fn(q, index, embedder, passages, vm, vt,
+                         **({"hotpot_type": hotpot_type,
+                             "hotpot_level": hotpot_level} if has_qt else {}))
                 prec, rec, f1 = compute_prf(out["answer"], gold)
                 records.append({
                     "question":     q,

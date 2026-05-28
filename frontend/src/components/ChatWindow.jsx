@@ -1,8 +1,33 @@
 import ChatMessage from './ChatMessage'
 
-export default function ChatWindow({ messages, loading, bottomRef }) {
+export default function ChatWindow({ messages, loading, bottomRef, sessionStats }) {
+  const { total, hallucinated, abstained } = sessionStats || {}
+  const hallucinationRate = total > 0 ? ((hallucinated / total) * 100).toFixed(1) : null
+  const abstentionRate    = total > 0 ? ((abstained    / total) * 100).toFixed(1) : null
+
   return (
     <div style={styles.window}>
+      {total > 0 && (
+        <div style={styles.statsBar}>
+          <StatChip label="Queries" value={total} color="var(--text-muted)" />
+          <StatChip
+            label="Hallucination Rate"
+            value={`${hallucinationRate}%`}
+            color={parseFloat(hallucinationRate) > 50 ? '#ef4444' : parseFloat(hallucinationRate) > 25 ? '#f59e0b' : '#22c55e'}
+          />
+          <StatChip
+            label="Abstention Rate"
+            value={`${abstentionRate}%`}
+            color="#94a3b8"
+          />
+          <StatChip
+            label="Answered"
+            value={`${total - abstained}/${total}`}
+            color="var(--accent-light)"
+          />
+        </div>
+      )}
+
       <div style={styles.inner}>
         {messages.map(msg => (
           <ChatMessage key={msg.id} message={msg} />
@@ -12,6 +37,15 @@ export default function ChatWindow({ messages, loading, bottomRef }) {
 
         <div ref={bottomRef} style={{ height: '1px' }} />
       </div>
+    </div>
+  )
+}
+
+function StatChip({ label, value, color }) {
+  return (
+    <div style={styles.statChip}>
+      <span style={styles.statLabel}>{label}</span>
+      <span style={{ ...styles.statValue, color }}>{value}</span>
     </div>
   )
 }
@@ -37,11 +71,44 @@ function TypingIndicator() {
 
 const styles = {
   window: {
-    flex:      1,
-    overflowY: 'auto',
-    padding:   '24px 0',
+    flex:          1,
+    overflowY:     'auto',
+    display:       'flex',
+    flexDirection: 'column',
+  },
+  statsBar: {
+    display:        'flex',
+    gap:            '8px',
+    padding:        '10px 24px',
+    borderBottom:   '1px solid var(--border)',
+    background:     'var(--bg-sidebar)',
+    flexWrap:       'wrap',
+    flexShrink:     0,
+  },
+  statChip: {
+    display:       'flex',
+    flexDirection: 'column',
+    alignItems:    'center',
+    padding:       '4px 14px',
+    borderRadius:  'var(--radius-sm)',
+    border:        '1px solid var(--border)',
+    background:    'var(--bg-primary)',
+    minWidth:      '90px',
+  },
+  statLabel: {
+    fontSize:      '10px',
+    fontWeight:    600,
+    letterSpacing: '0.06em',
+    textTransform: 'uppercase',
+    color:         'var(--text-muted)',
+  },
+  statValue: {
+    fontSize:   '16px',
+    fontWeight: 700,
+    marginTop:  '2px',
   },
   inner: {
+    padding: '24px 0',
     maxWidth: '780px',
     margin:   '0 auto',
     padding:  '0 24px',

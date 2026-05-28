@@ -24,6 +24,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
+from datasets import load_dataset
+
 from Stage_1_RAG_Pipeline import (
     load_faiss_index, rag_query as run_s1,
     build_faiss_index, load_hotpotqa_passages,
@@ -32,11 +34,45 @@ from Stage_1_RAG_Pipeline import (
 from Stage_2_RAG_Pipeline import rag_query_stage2 as run_s2
 from Stage_3_Adaptive_Retrieval import adaptive_rag_query as run_s3
 from Stage_4_Agentic_Loop import agentic_query as run_s4
-from Stage_2_Verifier_GPU import load_verifier, VERIFIER_PATH
+from Stage_2_Verifier_GPU import load_verifier, verify, VERIFIER_PATH
 
 
 # ── Shared pipeline state (loaded once at startup) ──
 _pipeline: dict = {}
+
+
+# ── Live evaluation helpers ──
+import re, string
+from collections import Counter
+
+def _normalize(text):
+    text = text.lower()
+    text = re.sub(r'\b(a|an|the)\b', ' ', text)
+    text = re.sub(f'[{re.escape(string.punctuation)}]', ' ', text)
+    return ' '.join(text.split())
+
+def _live_metrics(predicted: str, gold: str) -> dict:
+    """Compute EM, Precision, Recall, F1 for one prediction vs gold answer."""
+    p = _normalize(predicted)
+    g = _normalize(gold)
+    em = int(p == g)
+    p_toks = p.split()
+    g_toks = g.split()
+    if not p_toks or not g_toks:
+        return {"em": em, "precision": 0.0, "recall": 0.0, "f1": 0.0, "gold_answer": gold}
+    common = sum((Counter(p_toks) & Counter(g_toks)).values())
+    if common == 0:
+        return {"em": em, "precision": 0.0, "recall": 0.0, "f1": 0.0, "gold_answer": gold}
+    prec = common / len(p_toks)
+    rec  = common / len(g_toks)
+    f1   = 2 * prec * rec / (prec + rec)
+    return {
+        "em":           em,
+        "precision":    round(prec, 4),
+        "recall":       round(rec,  4),
+        "f1":           round(f1,   4),
+        "gold_answer":  gold,
+    }
 
 
 @asynccontextmanager
@@ -62,6 +98,18 @@ async def lifespan(app: FastAPI):
         _pipeline["verifier_model"]     = None
         _pipeline["verifier_tokenizer"] = None
         print("Verifier not found — Stage 4 will be unavailable.")
+
+    print("Building HotpotQA question-type/level/answer lookup...")
+    type_lookup: dict[str, dict] = {}
+    for split in ("train", "validation"):
+        for ex in load_dataset("hotpot_qa", "distractor", split=split):
+            type_lookup[ex["question"].lower().strip()] = {
+                "type":   ex["type"],
+                "level":  ex["level"],
+                "answer": ex["answer"],   # gold answer for live EM/F1 computation
+            }
+    _pipeline["type_lookup"] = type_lookup
+    print(f"Type/level/answer lookup ready — {len(type_lookup):,} questions indexed.")
 
     print("API ready at http://localhost:8000\n")
     yield
@@ -107,12 +155,17 @@ def chat(req: ChatRequest):
     emb = _pipeline["embedder"]
     pas = _pipeline["passages"]
 
+    # ── Gold answer + live metrics for any HotpotQA question ──
+    q_meta   = _pipeline.get("type_lookup", {}).get(req.question.lower().strip()) or {}
+    gold_ans = q_meta.get("answer")
+
     if req.stage == "stage1":
         result = run_s1(req.question, idx, emb, pas)
         return ChatResponse(
             answer=result["answer"],
             stage="stage1",
             metadata={
+                "eval":             _live_metrics(result["answer"], gold_ans) if gold_ans else None,
                 "retrieved_titles": [p["title"] for p in result["retrieved_passages"]],
             },
         )
@@ -134,6 +187,7 @@ def chat(req: ChatRequest):
                 "label":            result["label"],
                 "confidence":       round(float(result["confidence"]), 4),
                 "scores":           scores,
+                "eval":             _live_metrics(result["answer"], gold_ans) if gold_ans else None,
                 "retrieved_titles": [p["title"] for p in result["retrieved_passages"]],
             },
         )
@@ -146,18 +200,26 @@ def chat(req: ChatRequest):
                 status_code=503,
                 detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
             )
-        result = run_s3(req.question, idx, emb, pas, vm, vt)
+        meta = _pipeline.get("type_lookup", {}).get(req.question.lower().strip()) or {}
+        result = run_s3(req.question, idx, emb, pas, vm, vt, verbose=False,
+                        query_type_override=meta.get("type"),
+                        level_override=meta.get("level"))
         verif  = result.get("verification") or {}
         scores = {k: round(float(v), 4) for k, v in verif.get("scores", {}).items()}
         return ChatResponse(
             answer=result["answer"],
             stage="stage3",
             metadata={
-                "label":            verif.get("label", "UNKNOWN"),
-                "confidence":       round(float(verif.get("confidence", 0)), 4),
-                "scores":           scores,
-                "query_type":       result["query_type"],
-                "retrieved_titles": [p["title"] for p in result["retrieved"][:10]],
+                "query_type":         result["query_type"],
+                "level":              result["level"],
+                "retrieval_strategy": result["retrieval_strategy"],
+                "retrieval_params":   result["retrieval_params"],
+                "num_retrieved":      result["num_retrieved"],
+                "label":              verif.get("label", "UNKNOWN"),
+                "confidence":         round(float(verif.get("confidence", 0)), 4),
+                "scores":             scores,
+                "eval":               _live_metrics(result["answer"], gold_ans) if gold_ans else None,
+                "retrieved_titles":   [p["title"] for p in result["retrieved"][:10]],
             },
         )
 
@@ -169,7 +231,10 @@ def chat(req: ChatRequest):
                 status_code=503,
                 detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
             )
-        result = run_s4(req.question, idx, emb, pas, vm, vt, verbose=False)
+        meta = _pipeline.get("type_lookup", {}).get(req.question.lower().strip()) or {}
+        result = run_s4(req.question, idx, emb, pas, vm, vt, verbose=False,
+                        query_type_override=meta.get("type"),
+                        level_override=meta.get("level"))
 
         # Convert numpy/torch scalars → native Python floats for JSON serialization
         scores = {k: float(v) for k, v in result["verification"]["scores"].items()}
@@ -194,6 +259,7 @@ def chat(req: ChatRequest):
                 "iterations":          int(result["iterations"]),
                 "verification_scores": scores,
                 "iteration_log":       iter_log,
+                "eval":                _live_metrics(result["answer"], gold_ans) if gold_ans else None,
             },
         )
 

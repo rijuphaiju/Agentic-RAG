@@ -13,12 +13,13 @@ const WELCOME = {
 }
 
 export default function App() {
-  const [view, setView]         = useState('chat')    // 'chat' | 'results'
-  const [stage, setStage]       = useState('stage4')
-  const [messages, setMessages] = useState([WELCOME])
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState(null)
-  const bottomRef               = useRef(null)
+  const [view, setView]             = useState('chat')
+  const [stage, setStage]           = useState('stage4')
+  const [messages, setMessages]     = useState([WELCOME])
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState(null)
+  const [sessionStats, setSession]  = useState({ total: 0, hallucinated: 0, abstained: 0 })
+  const bottomRef                   = useRef(null)
 
   useEffect(() => {
     if (view === 'chat') {
@@ -52,7 +53,20 @@ export default function App() {
         throw new Error(err.detail || 'Request failed')
       }
 
-      const data = await res.json()
+      const data    = await res.json()
+      const meta    = data.metadata || {}
+      const scores  = meta.scores || meta.verification_scores || {}
+      const hasVerifier  = data.stage !== 'stage1'   // Stage 1 has no verifier
+      const hallProb     = (scores.PARTIAL || 0) + (scores.UNSUPPORTED || 0)
+      const abstained    = meta.status === 'ABSTAINED'
+      const hallucinated = hasVerifier && !abstained && hallProb >= 0.5
+
+      setSession(prev => ({
+        total:       prev.total + 1,
+        hallucinated: prev.hallucinated + (hallucinated ? 1 : 0),
+        abstained:   prev.abstained + (abstained ? 1 : 0),
+      }))
+
       const aiMsg = {
         id:       Date.now() + 1,
         role:     'assistant',
@@ -71,6 +85,7 @@ export default function App() {
   function clearChat() {
     setMessages([WELCOME])
     setError(null)
+    setSession({ total: 0, hallucinated: 0, abstained: 0 })
   }
 
   return (
@@ -86,7 +101,7 @@ export default function App() {
       <div style={styles.main}>
         {view === 'chat' ? (
           <>
-            <ChatWindow messages={messages} loading={loading} bottomRef={bottomRef} />
+            <ChatWindow messages={messages} loading={loading} bottomRef={bottomRef} sessionStats={sessionStats} />
 
             {error && (
               <div style={styles.errorBanner}>

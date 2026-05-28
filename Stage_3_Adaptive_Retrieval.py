@@ -90,6 +90,13 @@ MULTI_HOP_PATTERNS = [
     r'\bof\s+the\s+\w+\s+(?:that|who)\b',
     # passive bridge: "directed/written/made by the [noun] that/who"
     r'\b(?:directed|written|made|founded|invented|created|authored)\s+by\s+the\s+\w+\s+(?:that|who)\b',
+    # "[role] of [entity]" — implicit bridge: "the director of Inception", "the author of X"
+    r'\b(?:director|author|writer|producer|founder|creator|inventor|singer|composer|'
+    r'lead|star|ceo|president|chairman|captain|owner|manager|coach|editor|host)\s+of\b',
+    # "born/died in [place] who" or "who [verb]ed [work]"
+    r'\bwho\s+(?:starred|appeared|played|acted|directed|wrote|produced|founded|invented|composed|hosted)\b',
+    # "in [work] who/that" — entity identified through a work
+    r'\bin\s+(?:the\s+)?\w+(?:\s+\w+){0,2}\s+(?:who|that)\b',
 ]
 
 def classify_query(query):
@@ -379,59 +386,112 @@ def _extract_entities(query):
 # ─────────────────────────────────────────────
 # STEP 4: ADAPTIVE RAG PIPELINE (Stage 3)
 # ─────────────────────────────────────────────
+RETRIEVAL_STRATEGY_LABEL = {
+    "SIMPLE":     "BM25 + dense hybrid (single-hop)",
+    "MULTI_HOP":  "Iterative multi-hop retrieval (3 hops)",
+    "COMPARISON": "Parallel per-entity retrieval",
+}
+
+
+# Retrieval parameters per (query_type, level) combination.
+# More difficult questions get more hops and larger top_k pools.
+_RETRIEVAL_PARAMS = {
+    #              top_k  max_hops
+    ("SIMPLE",     "easy"):   (5,  1),
+    ("SIMPLE",     "medium"): (10, 1),
+    ("SIMPLE",     "hard"):   (15, 1),
+    ("MULTI_HOP",  "easy"):   (5,  2),
+    ("MULTI_HOP",  "medium"): (5,  3),
+    ("MULTI_HOP",  "hard"):   (8,  3),
+    ("COMPARISON", "easy"):   (5,  1),
+    ("COMPARISON", "medium"): (8,  1),
+    ("COMPARISON", "hard"):   (12, 1),
+}
+_DEFAULT_PARAMS = {
+    "SIMPLE":     (10, 1),
+    "MULTI_HOP":  (5,  3),
+    "COMPARISON": (8,  1),
+}
+
+
 def adaptive_rag_query(query, index, embedder, passages,
-                       verifier_model=None, verifier_tokenizer=None):
+                       verifier_model=None, verifier_tokenizer=None,
+                       verbose=True, query_type_override=None, level_override=None):
     """
     Full Stage 3 pipeline:
-    Query → Classify → Adaptive Retrieve → Generate → Verify → Return
+    Query → Classify (type + level) → Adaptive Retrieve → Generate → Verify → Return
 
-    If verifier is provided, shows verification result alongside answer.
+    Uses HotpotQA ground-truth type and level when provided, regex fallback otherwise.
     """
-    print(f"\n{'='*60}")
-    print(f"Query: {query}")
-    print(f"{'='*60}")
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Query: {query}")
+        print(f"{'='*60}")
 
-    # ── 1. Classify query complexity ──
-    query_type = classify_query(query)
-    print(f"Query type: {query_type}")
+    # ── 1. Determine query type ──
+    if query_type_override == "bridge":
+        query_type = "MULTI_HOP"
+    elif query_type_override == "comparison":
+        query_type = "COMPARISON"
+    else:
+        query_type = classify_query(query)
 
-    # ── 2. Adaptive retrieval ──
+    # ── 2. Select retrieval parameters based on type × level ──
+    level = level_override or "medium"
+    top_k, max_hops = _RETRIEVAL_PARAMS.get(
+        (query_type, level), _DEFAULT_PARAMS[query_type]
+    )
+
+    if verbose:
+        print(f"Query type: {query_type} | Level: {level} | "
+              f"top_k={top_k}, max_hops={max_hops}")
+        print(f"Strategy: {RETRIEVAL_STRATEGY_LABEL[query_type]}")
+
+    # ── 3. Adaptive retrieval with level-tuned parameters ──
     if query_type == "SIMPLE":
-        retrieved = retrieve_simple(query, index, embedder, passages)
+        retrieved = retrieve_simple(query, index, embedder, passages, top_k=top_k)
     elif query_type == "MULTI_HOP":
-        retrieved = retrieve_multi_hop(query, index, embedder, passages)
+        retrieved = retrieve_multi_hop(query, index, embedder, passages,
+                                       top_k=top_k, max_hops=max_hops)
     else:  # COMPARISON
-        retrieved = retrieve_comparison(query, index, embedder, passages)
+        retrieved = retrieve_comparison(query, index, embedder, passages, top_k=top_k)
 
-    print(f"\nRetrieved {len(retrieved)} passages:")
-    for i, p in enumerate(retrieved[:5]):  # show top 5
-        hop_info = f" [hop {p.get('hop', 1)}]" if query_type == "MULTI_HOP" else ""
-        ent_info = f" [{p.get('entity', '')}]" if query_type == "COMPARISON" else ""
-        print(f"  [{i+1}] {p['title']}{hop_info}{ent_info} (score: {p.get('score', 0):.4f})")
+    if verbose:
+        print(f"\nRetrieved {len(retrieved)} passages:")
+        for i, p in enumerate(retrieved[:5]):
+            hop_info = f" [hop {p.get('hop', 1)}]" if query_type == "MULTI_HOP" else ""
+            ent_info = f" [{p.get('entity', '')}]" if query_type == "COMPARISON" else ""
+            print(f"  [{i+1}] {p['title']}{hop_info}{ent_info} (score: {p.get('score', 0):.4f})")
 
     # ── 3. Rerank then generate ──
-    print("\nReranking passages...")
     pool     = retrieved[:TOP_K * 2] if len(retrieved) > TOP_K else retrieved
     reranked = rerank_passages(query, pool, top_k=TOP_K)
-    print("\nGenerating answer...")
-    answer = generate_answer(query, reranked, query_type=query_type)
-    print(f"\nAnswer: {answer}")
+    answer   = generate_answer(query, reranked, query_type=query_type)
 
-    # ── 4. Verify if verifier is available ──
+    if verbose:
+        print(f"\nAnswer: {answer}")
+
+    # ── 4. Verify ──
     verification = None
     if verifier_model is not None and verifier_tokenizer is not None:
-        context = " ".join([p["text"] for p in retrieved[:5]])
+        context = " ".join([p["text"] for p in reranked[:5]])
         verification = verify(context, answer, verifier_model, verifier_tokenizer)
-        print(f"\nVerification: {verification['icon']} {verification['label']} "
-              f"(confidence: {verification['confidence']:.4f})")
-        print(f"  Scores: {verification['scores']}")
+        if verbose:
+            icon = {"SUPPORTED": "✅", "PARTIAL": "⚠️", "UNSUPPORTED": "❌"}.get(verification["label"], "?")
+            print(f"\nVerification: {icon} {verification['label']} "
+                  f"(confidence: {verification['confidence']:.4f})")
 
     return {
-        "query":        query,
-        "query_type":   query_type,
-        "retrieved":    retrieved,
-        "answer":       answer,
-        "verification": verification,
+        "query":              query,
+        "query_type":         query_type,
+        "level":              level,
+        "retrieval_strategy": RETRIEVAL_STRATEGY_LABEL[query_type],
+        "retrieval_params":   {"top_k": top_k, "max_hops": max_hops},
+        "num_retrieved":      len(retrieved),
+        "retrieved":          retrieved,
+        "reranked":           reranked,
+        "answer":             answer,
+        "verification":       verification,
     }
 
 
