@@ -373,20 +373,25 @@ def generate_answer(query, retrieved_passages, model=OLLAMA_MODEL, query_type=No
         num_predict = 120
 
     elif query_type == "COMPARISON":
-        # Structured chain-of-thought to prevent entity-swapping errors.
+        # Chain-of-thought reasoning followed by a CONCISE final answer.
+        # Step 3 asks for the entity name only — NOT a justification sentence.
+        # Verbose justifications cause the LLM to fabricate specific numbers
+        # (award counts, dates) that are not in context, which the verifier
+        # correctly flags as UNSUPPORTED.  A short entity-name answer matches
+        # the gold answer format and is much easier to verify.
         prompt = (
             f"You are a precise question-answering assistant. "
             f"Answer using ONLY the provided context.\n\n"
             f"Context:\n{context}\n\n"
             f"Question: {query}\n\n"
             f"Instructions:\n"
-            f"1. Find the relevant attribute (e.g. birth year, founding date) for each entity in the context.\n"
-            f"   Note: 'first' = earlier date (smaller year number); 'older' = born earlier (smaller birth year).\n"
+            f"1. Find the relevant attribute for each entity in the context.\n"
+            f"   Note: 'first' = earlier date (smaller year); 'older' = born earlier (smaller birth year).\n"
             f"2. State both values explicitly, then compare them.\n"
-            f"3. Write your Final Answer in one sentence naming the answer and briefly stating why.\n\n"
+            f"3. Write 'Final Answer: <name>' where <name> is one of the two entities from the question — no explanation, no yes/no.\n\n"
             f"Reasoning:"
         )
-        num_predict = 180
+        num_predict = 150
 
     elif query_type == "SIMPLE":
         # Route by first question word to get the tightest possible answer span.
@@ -437,6 +442,7 @@ def generate_answer(query, retrieved_passages, model=OLLAMA_MODEL, query_type=No
             f"Instructions:\n"
             f"1. Identify the intermediate entity or fact that connects the question to the answer.\n"
             f"2. State that intermediate fact in one short phrase.\n"
+            f"   Note: 'first' = earlier date (smaller year); 'last'/'most recent' = later date (larger year).\n"
             f"3. Use it to find the final answer.\n"
             f"4. Write 'Final Answer: <answer>' — as few words as possible.\n\n"
             f"Reasoning:"
@@ -473,7 +479,61 @@ def generate_answer(query, retrieved_passages, model=OLLAMA_MODEL, query_type=No
 
 
 # ─────────────────────────────────────────────
-# STEP 4b: CROSS-ENCODER RERANKING
+# STEP 4b: LLM JUDGE (shared utility)
+# Used by Stage 3 and Stage 4 to catch entity-
+# role hallucinations that DistilBERT misses.
+# ─────────────────────────────────────────────
+def llm_judge_supported(question: str, answer: str,
+                         context_passages: list, verbose: bool = False) -> bool:
+    """Ask the LLM whether the context explicitly supports the answer.
+
+    DistilBERT verifier checks word/semantic overlap but cannot verify that a
+    named entity appears in the correct ROLE.  For example, "David Martínez"
+    may appear in retrieved passages but not as a Mexican F1 podium finisher.
+    DistilBERT sees the name → SUPPORTED (false positive).
+
+    This judge asks a direct YES/NO question to the same LLM already running
+    locally, catching role-mismatch hallucinations that DistilBERT misses.
+
+    Applied in Stage 3 and Stage 4 for MULTI_HOP and COMPARISON queries.
+    Only called when DistilBERT gives SUPPORTED to avoid per-iteration latency.
+
+    Returns True (keep SUPPORTED) or False (label should be PARTIAL/UNSUPPORTED).
+    """
+    # Use more passages so the judge can follow multi-hop chains across passages
+    context = " ".join(p["text"] for p in context_passages[:5])[:1200]
+    prompt = (
+        f"Question: {question}\n"
+        f"Proposed answer: {answer}\n\n"
+        f"Context (retrieved Wikipedia passages):\n{context}\n\n"
+        f"Task: Decide if '{answer}' is a correct and relevant answer to the question "
+        f"based on the context.\n\n"
+        f"Reply YES if:\n"
+        f"  - The context directly states '{answer}' as the answer, OR\n"
+        f"  - The context contains facts that logically lead to '{answer}' "
+        f"(e.g. two passages together imply it).\n\n"
+        f"Reply NO only if:\n"
+        f"  - '{answer}' appears in context but clearly in a DIFFERENT role or topic "
+        f"unrelated to the question, OR\n"
+        f"  - The context contradicts '{answer}'.\n\n"
+        f"Reply with only YES or NO."
+    )
+    try:
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0, "num_predict": 5},
+        )
+        reply = response["message"]["content"].strip().upper()
+        if verbose:
+            print(f"[LLM Judge] {reply}")
+        return reply.startswith("YES")
+    except Exception:
+        return True  # if Ollama fails, trust DistilBERT
+
+
+# ─────────────────────────────────────────────
+# STEP 4c: CROSS-ENCODER RERANKING
 # ─────────────────────────────────────────────
 def rerank_passages(query, passages, top_k=TOP_K):
     """

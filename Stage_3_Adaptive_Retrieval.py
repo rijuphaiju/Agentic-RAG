@@ -44,6 +44,7 @@ from Stage_1_RAG_Pipeline import (
     retrieve as _retrieve_dense,
     normalize_answer,
     exact_match,
+    llm_judge_supported,
     INDEX_PATH,
     PASSAGES_PATH,
     EMBED_MODEL,
@@ -51,7 +52,7 @@ from Stage_1_RAG_Pipeline import (
 )
 
 # ── Stage 2 verifier ──
-from Stage_2_Verifier_GPU import load_verifier, verify, VERIFIER_PATH
+from Stage_2_Verifier_GPU import load_verifier, verify, build_verify_context, VERIFIER_PATH
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -59,9 +60,10 @@ from Stage_2_Verifier_GPU import load_verifier, verify, VERIFIER_PATH
 DEVICE      = ("cuda" if torch.cuda.is_available()
                else "mps" if torch.backends.mps.is_available()
                else "cpu")
-TOP_K       = 10       # passages per retrieval call
-TOP_K_MULTI = 5        # passages per hop in multi-hop retrieval
-MAX_HOPS    = 3        # maximum hops for multi-hop retrieval
+TOP_K              = 10    # passages per retrieval call
+TOP_K_MULTI        = 5     # passages per hop in multi-hop retrieval
+MAX_HOPS           = 3     # maximum hops for multi-hop retrieval
+LOW_SUPPORT_THRESHOLD = 0.15  # below this, multi-hop answer is treated as unreliable
 
 
 # ─────────────────────────────────────────────
@@ -73,9 +75,22 @@ COMPARISON_WORDS = {
     "both", "same", "different", "compare", "versus", "vs",
     "older", "newer", "bigger", "smaller", "taller", "shorter",
     "longer", "earlier", "later", "more", "less", "better", "worse",
+    "first", "last", "most", "least",  # temporal/ordinal: "born first", "founded last"
     # NOTE: "which" and "either"/"neither" removed — they appear in MULTI_HOP
     # questions like "Which magazine was started first" and caused wrong routing.
 }
+
+_REFUSAL_PATTERNS = re.compile(
+    r'\b(cannot provide|i cannot|do not appear|does not appear|'
+    r'no information|not mentioned|not in the context|cannot be found|'
+    r'not available|i don\'t have|does not contain)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_refusal(answer: str) -> bool:
+    """True when the LLM refused to answer because the entity wasn't in context."""
+    return bool(_REFUSAL_PATTERNS.search(answer))
 
 # Patterns that indicate a true multi-hop question — one where an intermediate
 # entity must be resolved before the main question can be answered.
@@ -108,7 +123,8 @@ def classify_query(query):
     During the experimental phase this can be replaced with a trained classifier.
     """
     q_lower = query.lower()
-    tokens  = set(q_lower.split())
+    # Strip punctuation before tokenizing so "first," and "first" both match
+    tokens  = set(re.sub(r'[^\w\s]', '', q_lower).split())
 
     # COMPARISON: explicit comparison words + two named entities
     if tokens & COMPARISON_WORDS:
@@ -281,13 +297,17 @@ def retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI):
 
     # Extract the comparison attribute from the query (e.g. "older" → "birth year age")
     attribute_map = {
-        r'\bolder\b|\byounger\b':            "birth year age born",
-        r'\btaller\b|\bshorter\b':           "height",
-        r'\bricher\b|\bwealthier\b':         "net worth wealth",
-        r'\bnationality\b|\bcountry\b':      "nationality country born",
-        r'\bsame language\b|\bboth from\b':  "origin country language",
-        r'\bbetter\b|\bworse\b':             "comparison",
-        r'\bearlier\b|\blater\b|\bfirst\b':  "founded started year",
+        r'\bolder\b|\byounger\b':                        "birth year age born",
+        r'\btaller\b|\bshorter\b':                       "height",
+        r'\bricher\b|\bwealthier\b':                     "net worth wealth",
+        r'\bnationality\b|\bcountry\b':                  "nationality country born",
+        r'\bsame language\b|\bboth from\b':              "origin country language",
+        r'\bearlier\b|\blater\b|\bfirst\b':              "founded started year",
+        r'\bawards?\b|\bwon\b|\bwins?\b|\baccolades?\b': "awards won wins accolades",
+        r'\balbums?\b|\bsongs?\b|\bhits?\b':             "albums discography songs",
+        r'\bgoals?\b|\bscored\b|\bpoints?\b':            "goals scored points career",
+        r'\bbooks?\b|\bnovels?\b|\bwritten\b':           "books written novels published",
+        r'\bbetter\b|\bworse\b|\bmore\b|\bless\b':       "comparison career achievements",
     }
     attribute_suffix = ""
     for pattern, suffix in attribute_map.items():
@@ -360,7 +380,20 @@ def _reformulate_query(original_query, context_snippet):
     )
     predicate = predicates[0].lower() if predicates else ""
 
-    return f"{bridge} {predicate}".strip() if predicate else bridge
+    # Also preserve spatial/proximity relations — these are dropped by entity-only
+    # extraction, causing hop N+1 to retrieve general bio pages instead of the
+    # passage that contains the specific relational fact being asked about.
+    # e.g. "What is a block away from X?" → hop 2 should be "X block away" not just "X"
+    spatial = re.findall(
+        r'\b(block away|next to|adjacent|across from|near|nearby|'
+        r'borders|bordered|surrounding|inside|within|outside|'
+        r'capital|headquarters|home|based in)\b',
+        original_query, re.IGNORECASE,
+    )
+    spatial_term = spatial[0].lower() if spatial else ""
+
+    suffix = predicate or spatial_term
+    return f"{bridge} {suffix}".strip() if suffix else bridge
 
 
 def _extract_entities(query):
@@ -468,18 +501,89 @@ def adaptive_rag_query(query, index, embedder, passages,
     reranked = rerank_passages(query, pool, top_k=TOP_K)
     answer   = generate_answer(query, reranked, query_type=query_type)
 
+    # Fix 4: if multi-hop retrieval produced a refusal ("I cannot provide..."),
+    # the specific entity is not in the index — fall back to simple retrieval on
+    # the full query so other entity signals can still find the correct passage.
+    if query_type == "MULTI_HOP" and _is_refusal(answer):
+        if verbose:
+            print("[Fallback] Multi-hop refusal detected — retrying with simple retrieval")
+        fb_retrieved = retrieve_simple(query, index, embedder, passages, top_k=TOP_K)
+        fb_reranked  = rerank_passages(query, fb_retrieved, top_k=TOP_K)
+        fb_answer    = generate_answer(query, fb_reranked, query_type="SIMPLE")
+        if not _is_refusal(fb_answer):
+            answer   = fb_answer
+            reranked = fb_reranked
+            if verbose:
+                print(f"[Fallback] Using simple-retrieval answer: {fb_answer}")
+
     if verbose:
         print(f"\nAnswer: {answer}")
 
     # ── 4. Verify ──
     verification = None
     if verifier_model is not None and verifier_tokenizer is not None:
-        context = " ".join([p["text"] for p in reranked[:5]])
-        verification = verify(context, answer, verifier_model, verifier_tokenizer)
+        context = build_verify_context(reranked, answer)
+        verification = verify(context, answer, verifier_model, verifier_tokenizer, question=query)
+
+        # LLM judge: for MULTI_HOP and COMPARISON, DistilBERT can falsely give
+        # SUPPORTED when a hallucinated entity name happens to appear in context
+        # but not in the correct role.  Apply the same judge used in Stage 4 so
+        # Stage 3's displayed label is consistent with Stage 4's decision.
+        if (verification["label"] == "SUPPORTED"
+                and query_type in ("MULTI_HOP", "COMPARISON")):
+            judge_ok = llm_judge_supported(query, answer, reranked, verbose)
+            if not judge_ok:
+                # Swap scores so the display is honest:
+                # original SUPPORTED score → becomes PARTIAL (high hallucination)
+                # original PARTIAL  score → becomes SUPPORTED (low support)
+                # Result: Confidence ~95% in Partial label, Support Score ~2%, Hallucination ~97%
+                orig = verification["scores"]
+                swapped = {
+                    "SUPPORTED":   orig["PARTIAL"],
+                    "PARTIAL":     orig["SUPPORTED"],
+                    "UNSUPPORTED": orig["UNSUPPORTED"],
+                }
+                verification = {
+                    **verification,
+                    "label":      "PARTIAL",
+                    "confidence": orig["SUPPORTED"],  # high confidence the answer is PARTIAL/wrong
+                    "scores":     swapped,
+                }
+                if verbose:
+                    print("[LLM Judge] Overriding SUPPORTED → PARTIAL "
+                          "(entity not in correct role)")
+
         if verbose:
             icon = {"SUPPORTED": "✅", "PARTIAL": "⚠️", "UNSUPPORTED": "❌"}.get(verification["label"], "?")
             print(f"\nVerification: {icon} {verification['label']} "
                   f"(confidence: {verification['confidence']:.4f})")
+
+        # Low-support fallback for MULTI_HOP: when the multi-hop retrieval produced a
+        # confident but wrong answer (e.g. the singer instead of the writer), the
+        # verifier gives low support even though it's not a refusal.
+        # Simple retrieval on the full query uses all entity signals equally and often
+        # finds the right passage (e.g. BM25 matches "writer" + "died 2007" together).
+        if (query_type == "MULTI_HOP"
+                and verification["scores"].get("SUPPORTED", 1.0) < LOW_SUPPORT_THRESHOLD
+                and not _is_refusal(answer)):
+            if verbose:
+                print(f"[Fallback] Low support ({verification['scores'].get('SUPPORTED',0):.3f}) "
+                      f"on MULTI_HOP — retrying with simple retrieval")
+            fb_retrieved   = retrieve_simple(query, index, embedder, passages, top_k=TOP_K)
+            fb_reranked    = rerank_passages(query, fb_retrieved, top_k=TOP_K)
+            fb_answer      = generate_answer(query, fb_reranked, query_type="SIMPLE")
+            if not _is_refusal(fb_answer):
+                fb_context     = build_verify_context(fb_reranked, fb_answer)
+                fb_verification = verify(fb_context, fb_answer,
+                                         verifier_model, verifier_tokenizer, question=query)
+                fb_support = fb_verification["scores"].get("SUPPORTED", 0.0)
+                if fb_support > verification["scores"].get("SUPPORTED", 0.0):
+                    answer       = fb_answer
+                    reranked     = fb_reranked
+                    verification = fb_verification
+                    if verbose:
+                        print(f"[Fallback] Using simple-retrieval answer: {fb_answer} "
+                              f"(support: {fb_support:.3f})")
 
     return {
         "query":              query,
@@ -543,12 +647,12 @@ def evaluate_adaptive(index, embedder, passages,
         s3_em     = exact_match(s3_answer, gold_answer)
 
         # ── Hallucination check via verifier ──
-        context = " ".join([p["text"] for p in s1_retrieved[:5]])
-        s1_verif = verify(context, s1_answer, verifier_model, verifier_tokenizer)
+        context = build_verify_context(s1_retrieved, s1_answer)
+        s1_verif = verify(context, s1_answer, verifier_model, verifier_tokenizer, question=query)
         s1_halluc = 1 if s1_verif["label"] in ("PARTIAL", "UNSUPPORTED") else 0
 
-        context = " ".join([p["text"] for p in s3_retrieved[:5]])
-        s3_verif = verify(context, s3_answer, verifier_model, verifier_tokenizer)
+        context = build_verify_context(s3_retrieved, s3_answer)
+        s3_verif = verify(context, s3_answer, verifier_model, verifier_tokenizer, question=query)
         s3_halluc = 1 if s3_verif["label"] in ("PARTIAL", "UNSUPPORTED") else 0
 
         stage1_em.append(s1_em)

@@ -2,11 +2,12 @@ import { useState } from 'react'
 
 // ── Label colour helpers ──────────────────────────────────────────────────
 const LABEL_CFG = {
-  SUPPORTED:   { color: '#22c55e', bg: 'rgba(34,197,94,0.10)',  border: 'rgba(34,197,94,0.25)',  icon: '✓', text: 'Supported'   },
-  PARTIAL:     { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.25)', icon: '~', text: 'Partial'     },
-  UNSUPPORTED: { color: '#ef4444', bg: 'rgba(239,68,68,0.10)',  border: 'rgba(239,68,68,0.25)',  icon: '✕', text: 'Unsupported' },
-  ABSTAINED:   { color: '#94a3b8', bg: 'rgba(148,163,184,0.10)',border: 'rgba(148,163,184,0.25)',icon: '—', text: 'Abstained'   },
-  UNKNOWN:     { color: '#64748b', bg: 'rgba(100,116,139,0.10)',border: 'rgba(100,116,139,0.20)',icon: '?', text: 'Unknown'     },
+  SUPPORTED:    { color: '#22c55e', bg: 'rgba(34,197,94,0.10)',  border: 'rgba(34,197,94,0.25)',  icon: '✓', text: 'Supported'   },
+  PARTIAL:      { color: '#f59e0b', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.25)', icon: '~', text: 'Partial'     },
+  UNSUPPORTED:  { color: '#ef4444', bg: 'rgba(239,68,68,0.10)',  border: 'rgba(239,68,68,0.25)',  icon: '✕', text: 'Unsupported' },
+  ABSTAINED:    { color: '#94a3b8', bg: 'rgba(148,163,184,0.10)',border: 'rgba(148,163,184,0.25)',icon: '—', text: 'Abstained'   },
+  BEST_EFFORT:  { color: '#fb923c', bg: 'rgba(251,146,60,0.10)', border: 'rgba(251,146,60,0.25)', icon: '≈', text: 'Best Effort' },
+  UNKNOWN:      { color: '#64748b', bg: 'rgba(100,116,139,0.10)',border: 'rgba(100,116,139,0.20)',icon: '?', text: 'Unknown'     },
 }
 
 const QTYPE_CFG = {
@@ -57,11 +58,16 @@ function deriveMetrics(stage, meta) {
   if (stage === 'stage4') {
     const status = meta.status || 'UNKNOWN'
     const abstained = status === 'ABSTAINED'
+    const sc = meta.verification_scores || {}
+    // Map pipeline status → which verifier label to read confidence from
+    const labelForConf = status === 'SUPPORTED'   ? 'SUPPORTED'
+                       : status === 'BEST_EFFORT' ? 'PARTIAL'
+                       : status === 'ABSTAINED'   ? 'UNSUPPORTED'
+                       : null
+    const confidence = labelForConf ? (sc[labelForConf] ?? null) : null
     return {
       label:        status,
-      confidence:   meta.verification_scores
-                      ? Math.max(...Object.values(meta.verification_scores))
-                      : null,
+      confidence,
       hallucinated: !abstained && status !== 'SUPPORTED',
       abstained,
       query_type:   meta.query_type,
@@ -178,15 +184,41 @@ function buildMetricRows(stage, metrics, meta) {
     })
   }
 
-  // Confidence
+  // Label Confidence — how sure the verifier is about its own label (NOT whether the answer is right)
   if (metrics.confidence !== null) {
-    const pct = (metrics.confidence * 100).toFixed(1)
-    const color = metrics.confidence >= 0.7 ? '#22c55e'
-                : metrics.confidence >= 0.45 ? '#f59e0b'
-                : '#ef4444'
+    const pct   = (metrics.confidence * 100).toFixed(1)
+    const lbl   = metrics.label || 'UNKNOWN'
+    const cfg   = LABEL_CFG[lbl] || LABEL_CFG.UNKNOWN
     rows.push({
       label:   'Confidence',
-      valueEl: <span style={{ color, fontWeight: 600 }}>{pct}%</span>,
+      valueEl: (
+        <span style={{ color: cfg.color, fontWeight: 600 }}>
+          {pct}%
+          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px', marginLeft: 4 }}>
+            (in {cfg.text} label)
+          </span>
+        </span>
+      ),
+    })
+  }
+
+  // Support Score — P(SUPPORTED): the actual probability the answer is correct per verifier
+  const _scoresForSupport = meta?.scores || meta?.verification_scores || {}
+  if (Object.keys(_scoresForSupport).length > 0) {
+    const supportPct = ((_scoresForSupport.SUPPORTED || 0) * 100).toFixed(1)
+    const sColor = (_scoresForSupport.SUPPORTED || 0) >= 0.5 ? '#22c55e'
+                 : (_scoresForSupport.SUPPORTED || 0) >= 0.2 ? '#f59e0b'
+                 : '#ef4444'
+    rows.push({
+      label:   'Support Score',
+      valueEl: (
+        <span style={{ color: sColor, fontWeight: 600 }}>
+          {supportPct}%
+          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px', marginLeft: 4 }}>
+            (P(answer is correct))
+          </span>
+        </span>
+      ),
     })
   }
 
@@ -238,14 +270,23 @@ function buildMetricRows(stage, metrics, meta) {
     })
   }
 
-  // Hallucination probability from verifier scores
+  // Hallucination Probability = P(PARTIAL) + P(UNSUPPORTED) — probability the answer is not fully correct
+  // Note: this is the complement of Support Score. High confidence in PARTIAL label →
+  // high Hallucination Probability. Both numbers can be high simultaneously and are consistent.
   const scores = meta?.scores || meta?.verification_scores || {}
   const hallProb = ((scores.PARTIAL || 0) + (scores.UNSUPPORTED || 0)) * 100
   if (Object.keys(scores).length > 0) {
     const hColor = hallProb >= 50 ? '#ef4444' : hallProb >= 25 ? '#f59e0b' : '#22c55e'
     rows.push({
       label:   'Hallucination Probability',
-      valueEl: <span style={{ color: hColor, fontWeight: 600 }}>{hallProb.toFixed(1)}%</span>,
+      valueEl: (
+        <span style={{ color: hColor, fontWeight: 600 }}>
+          {hallProb.toFixed(1)}%
+          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '11px', marginLeft: 4 }}>
+            (P+U scores)
+          </span>
+        </span>
+      ),
     })
   } else if (metrics.hallucinated === null) {
     rows.push({
@@ -286,7 +327,9 @@ function buildMetricRows(stage, metrics, meta) {
       label:   'Abstention',
       valueEl: metrics.abstained
         ? <span style={{ color: '#94a3b8', fontWeight: 600 }}>Yes — insufficient evidence</span>
-        : <span style={{ color: 'var(--text-secondary)' }}>No</span>,
+        : meta?.status === 'BEST_EFFORT'
+          ? <span style={{ color: '#fb923c', fontWeight: 600 }}>No — best-effort answer returned</span>
+          : <span style={{ color: 'var(--text-secondary)' }}>No</span>,
     })
   } else {
     rows.push({

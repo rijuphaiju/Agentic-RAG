@@ -237,7 +237,9 @@ def chat(req: ChatRequest):
                         level_override=meta.get("level"))
 
         # Convert numpy/torch scalars → native Python floats for JSON serialization
-        scores = {k: float(v) for k, v in result["verification"]["scores"].items()}
+        # result["verification"] may be {} when all iterations were UNSUPPORTED (abstain)
+        raw_scores = result["verification"].get("scores", {"SUPPORTED": 0.0, "PARTIAL": 0.0, "UNSUPPORTED": 1.0})
+        scores = {k: float(v) for k, v in raw_scores.items()}
         iter_log = [
             {
                 "iteration":    it["iteration"],
@@ -278,4 +280,4 @@ def get_results():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("Stage_5_API:app", host="0.0.0.0", port=8000, reload=True)
