@@ -402,11 +402,23 @@ def evaluate(num_samples: int = 50):
         hotpot_type  = ex.get("type")    # "bridge" or "comparison"
         hotpot_level = ex.get("level")   # "easy", "medium", "hard"
 
+        s3_query_type = None   # captured after Stage 3 runs; passed to Stage 4
+
         for stage_label, fn, records, has_qt in RUNNERS:
             try:
-                out = fn(q, index, embedder, passages, vm, vt,
-                         **({"hotpot_type": hotpot_type,
-                             "hotpot_level": hotpot_level} if has_qt else {}))
+                if stage_label == "Stage 4":
+                    # Use Stage 3's resolved query type so both stages classify
+                    # the same question identically (Fix 1).
+                    qt_override = s3_query_type if s3_query_type else hotpot_type
+                    out = fn(q, index, embedder, passages, vm, vt,
+                             hotpot_type=qt_override, hotpot_level=hotpot_level)
+                else:
+                    out = fn(q, index, embedder, passages, vm, vt,
+                             **({"hotpot_type": hotpot_type,
+                                 "hotpot_level": hotpot_level} if has_qt else {}))
+                if stage_label == "Stage 3":
+                    s3_query_type = out.get("query_type")
+
                 prec, rec, f1 = compute_prf(out["answer"], gold)
                 records.append({
                     "question":     q,

@@ -4,7 +4,7 @@ Exposes the RAG pipeline stages as a REST API for the React frontend.
 
 Usage:
     python Stage_5_API.py
-    # API available at http://localhost:8000
+    # API available at http://localhost:8001
     # React frontend connects via proxy at http://localhost:5173
 """
 
@@ -178,17 +178,28 @@ def chat(req: ChatRequest):
                 status_code=503,
                 detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
             )
-        result = run_s2(req.question, idx, emb, pas, vm, vt, verbose=False)
-        scores = {k: round(float(v), 4) for k, v in result["scores"].items()}
+        # Stage 2 = Stage 1 retrieval + generation, then the verifier classifies
+        # the answer.  It does NOT run its own separate retrieval — doing so would
+        # retrieve different passages and generate a different answer, making
+        # Stage 2 incomparable to Stage 1 in the paper's Table 6.2.
+        s1_result  = run_s1(req.question, idx, emb, pas)
+        answer     = s1_result["answer"]
+        s1_passages = s1_result["retrieved_passages"]
+
+        from Stage_2_Verifier_GPU import build_verify_context, verify
+        ctx          = build_verify_context(s1_passages, answer)
+        verification = verify(ctx, answer, vm, vt, question=req.question)
+        scores       = {k: round(float(v), 4) for k, v in verification["scores"].items()}
+
         return ChatResponse(
-            answer=result["answer"],
+            answer=answer,
             stage="stage2",
             metadata={
-                "label":            result["label"],
-                "confidence":       round(float(result["confidence"]), 4),
+                "label":            verification["label"],
+                "confidence":       round(float(verification["confidence"]), 4),
                 "scores":           scores,
-                "eval":             _live_metrics(result["answer"], gold_ans) if gold_ans else None,
-                "retrieved_titles": [p["title"] for p in result["retrieved_passages"]],
+                "eval":             _live_metrics(answer, gold_ans) if gold_ans else None,
+                "retrieved_titles": [p["title"] for p in s1_passages],
             },
         )
 
@@ -280,4 +291,4 @@ def get_results():
 
 
 if __name__ == "__main__":
-    uvicorn.run("Stage_5_API:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("Stage_5_API:app", host="0.0.0.0", port=8001, reload=True)

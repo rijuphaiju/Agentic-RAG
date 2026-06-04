@@ -43,6 +43,7 @@ from Stage_1_RAG_Pipeline import (
     rerank_passages,
     exact_match,
     llm_judge_supported,
+    rag_query as _s1_rag_query,
     INDEX_PATH,
     PASSAGES_PATH,
     OLLAMA_MODEL,
@@ -54,12 +55,17 @@ from Stage_2_Verifier_GPU import load_verifier, verify, build_verify_context, VE
 # Stage 3
 from Stage_3_Adaptive_Retrieval import (
     classify_query,
+    estimate_complexity,
     retrieve_simple,
     retrieve_multi_hop,
     retrieve_comparison,
+    adaptive_retrieve_with_coverage_check,
+    _retrieve_for_type,
     TOP_K,
-    _RETRIEVAL_PARAMS,
-    _DEFAULT_PARAMS,
+    _RETRIEVAL_PARAMS,   # kept for backward compat
+    _DEFAULT_PARAMS,     # kept for backward compat
+    _BUDGET,
+    _DEFAULT_BUDGET,
 )
 
 # ─────────────────────────────────────────────
@@ -86,7 +92,9 @@ LOW_SUPPORT_THRESHOLD = 0.15         # PARTIAL answers below this support score 
 _REFUSAL_RE = re.compile(
     r'\b(cannot provide|i cannot|do not appear|does not appear|'
     r'no information|not mentioned|not in the context|cannot be found|'
-    r'not available|i don\'t have|does not contain)\b',
+    r'not available|i don\'t have|does not contain|'
+    r'not found|not determined|not specified|cannot determine|'
+    r'information is not|answer is not|year is not|cannot be determined)\b',
     re.IGNORECASE,
 )
 
@@ -94,6 +102,86 @@ _REFUSAL_RE = re.compile(
 def _is_refusal(answer: str) -> bool:
     """True when the LLM refused because the entity wasn't in retrieved context."""
     return bool(_REFUSAL_RE.search(answer))
+
+
+# Question patterns that require a numeric answer.
+# Key: regex matching the question. Value: description used in verbose logs.
+_NUMERIC_QUESTION_PATTERNS = [
+    (re.compile(r'\bpopulation\b',              re.I), "population (expects a number)"),
+    (re.compile(r'\bhow many\b',                re.I), "how many (expects a number)"),
+    (re.compile(r'\bhow much\b',                re.I), "how much (expects a number)"),
+    (re.compile(r'\bwhat year\b',               re.I), "what year (expects a year)"),
+    (re.compile(r'\bin what year\b',            re.I), "in what year (expects a year)"),
+    (re.compile(r'\bwhat.{0,10}year.{0,10}(?:was|did|were|is)\b', re.I), "year question"),
+    (re.compile(r'\bhow (tall|long|far|old|high|wide|deep|large|big|small)\b', re.I),
+     "measurement (expects a number)"),
+]
+
+
+def _answer_type_mismatch(question: str, answer: str) -> bool:
+    """
+    Return True when the question expects a numeric answer but the pipeline
+    returned a non-numeric answer (e.g. a place name instead of a population).
+
+    This is a general post-generation check that does not require ground truth.
+    It catches cases where retrieval found the correct intermediate entity but
+    failed to retrieve the numeric fact the question is actually asking for.
+
+    Examples:
+      "what was the population..." -> "New Hampshire"    -> MISMATCH (no number)
+      "what was the population..." -> "6,241"            -> OK
+      "in what year was X born?"   -> "Meredith"         -> MISMATCH (no year)
+      "in what year was X born?"   -> "1945"             -> OK
+      "who directed X?"            -> "Christopher Nolan" -> OK (no numeric expectation)
+    """
+    ans_lower = answer.strip().lower()
+    # Ignore refusals -- they are handled separately
+    if _is_refusal(answer):
+        return False
+
+    for pattern, _desc in _NUMERIC_QUESTION_PATTERNS:
+        if pattern.search(question):
+            # Question expects a number -- check the answer contains digits
+            if not re.search(r'\d', answer):
+                return True   # e.g. "New Hampshire" for a population question
+            break             # contains digits -- no mismatch for this pattern
+
+    return False
+
+
+# Minimum fraction of non-refusal iterations that must agree on the same answer
+# before Stage 4 will return BEST_EFFORT.  Below this threshold the loop has not
+# converged — different retrieval attempts gave different answers — which is proof
+# of uncertainty regardless of individual per-iteration verifier scores.
+#
+# With MAX_ITERATIONS=5:
+#   0.60 → at least 3 out of 5 (or 3 out of 4, etc.) must agree
+#   Setting higher reduces false-positive BEST_EFFORT; setting lower allows more
+#   answers through but risks returning drifted fabrications.
+CONSENSUS_THRESHOLD = 0.80
+
+
+def _majority_answer(iteration_log: list) -> tuple:
+    """
+    Return (majority_answer, consensus_ratio) across all non-refusal iterations.
+    Normalises answers before counting so "Joe Hart" and "Joe Hart." collapse.
+    Returns ("", 0.0) when every iteration was a refusal.
+    """
+    from collections import Counter
+    answered = [
+        re.sub(r'[^\w\s]', '', log["answer"].lower()).strip()
+        for log in iteration_log
+        if log.get("answer") and not _is_refusal(log["answer"])
+    ]
+    if not answered:
+        return "", 0.0
+    most_common, count = Counter(answered).most_common(1)[0]
+    # Return the original (non-normalised) answer text for the majority
+    for log in iteration_log:
+        raw = log.get("answer", "")
+        if re.sub(r'[^\w\s]', '', raw.lower()).strip() == most_common:
+            return raw, count / len(answered)
+    return "", 0.0
 
 
 # ─────────────────────────────────────────────
@@ -107,14 +195,28 @@ def reformulate_query(original_query, iteration, retrieved_passages, answer):
 
     Implements the query reformulation function f(q0, Ct-1)
     from proposal Section 2.6 Equation.
-    """
-    import re
 
-    # Always extract capitalized entity names to preserve them across iterations
+    Key fix: when the original query contains NO named entities (e.g., "Who was
+    once the best kickboxer..."), reformulation based on the original query alone
+    produces generic terms ("controversies", "kickboxer") that cause retrieval to
+    drift toward unrelated content.  In these cases, the current answer is used
+    as the anchor entity so subsequent hops stay focused on verifying THAT answer
+    rather than retrieving entirely different content.
+    """
+    # Extract named entities from the original query
     entities = re.findall(r'\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b', original_query)
-    # Remove single-word question starters like "Who", "Which", "What"
     entities = [e for e in entities
                 if e.lower() not in {"who", "what", "where", "when", "which", "how"}]
+
+    # When the query has no named entities, anchor on the current answer instead.
+    # Without an anchor, reformulation produces bare predicate terms that retrieve
+    # unrelated passages and the answer drifts away from the correct entity.
+    if not entities and answer:
+        ans_entities = re.findall(r'\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b', answer)
+        ans_entities = [e for e in ans_entities
+                        if len(e) > 2 and e.lower() not in
+                        {"who", "what", "where", "when", "which", "how", "the", "a"}]
+        entities = ans_entities[:2]
 
     if iteration == 1:
         # Strategy 1: key entities + the dominant predicate word from the question.
@@ -187,25 +289,55 @@ def agentic_query(query, index, embedder, passages,
         print(f"{'='*60}")
 
     # Use ground-truth type from dataset when available (evaluation), else regex (live chat)
-    if query_type_override == "bridge":
+    # Accepts Stage 3's resolved type ("MULTI_HOP"/"COMPARISON"/"SIMPLE") directly
+    # so Stage 4 never reclassifies a question Stage 3 already classified.
+    if query_type_override in ("MULTI_HOP", "COMPARISON", "SIMPLE"):
+        query_type = query_type_override
+    elif query_type_override == "bridge":
         query_type = "MULTI_HOP"
     elif query_type_override == "comparison":
         query_type = "COMPARISON"
     else:
         query_type = classify_query(query)
+
+    # Complexity drives retrieval budget — use HotpotQA ground truth when available,
+    # otherwise estimate from the question itself (same logic as Stage 3).
+    complexity  = level_override if level_override else estimate_complexity(query)
+    budget      = _BUDGET.get((query_type, complexity), _DEFAULT_BUDGET[query_type])
+    r_top_k     = budget["top_k"]
+    r_max_hops  = budget["max_hops"]
+
+    # Confidence-gated escalation (mirrors Stage 3's adaptive_rag_query).
+    # 71.1% of HotpotQA "bridge" questions are answerable with single-hop retrieval.
+    # Locking in SIMPLE for the whole loop prevents 5 iterations of MULTI_HOP drift
+    # producing a fabricated answer worse than the Stage 3 result.
+    _SIMPLE_SUFFICIENT = 0.65
+    _s4_gate_fired     = False   # True when gate downgraded MULTI_HOP -> SIMPLE
+    if query_type == "MULTI_HOP":
+        from Stage_3_Adaptive_Retrieval import estimate_retrieval_confidence
+        _sp   = retrieve_simple(query, index, embedder, passages, top_k=r_top_k)
+        _sr   = rerank_passages(query, _sp, top_k=TOP_K)
+        _sc   = estimate_retrieval_confidence(_sr)
+        if _sc >= _SIMPLE_SUFFICIENT:
+            if verbose:
+                print(f"[Escalation gate] SIMPLE conf={_sc:.3f} >= "
+                      f"{_SIMPLE_SUFFICIENT} -- using SIMPLE for entire loop")
+            _s4_gate_fired = True
+            query_type = "SIMPLE"
+            budget     = _BUDGET.get(("SIMPLE", complexity), _DEFAULT_BUDGET["SIMPLE"])
+            r_top_k    = budget["top_k"]
+            r_max_hops = budget["max_hops"]
+
     current_query   = query
     all_retrieved   = []
     iteration_log   = []
     best_candidate  = None   # best (answer, label, confidence) seen across all iterations
     _label_rank     = {"SUPPORTED": 2, "PARTIAL": 1, "UNSUPPORTED": 0}
-
-    level = level_override or "medium"
-    r_top_k, r_max_hops = _RETRIEVAL_PARAMS.get(
-        (query_type, level), _DEFAULT_PARAMS[query_type]
-    )
+    bridge_ctx      = None   # set by Stage 3 multi-hop decomposition
 
     if verbose:
-        print(f"Query type: {query_type} | Level: {level} | top_k={r_top_k}, max_hops={r_max_hops}")
+        print(f"Type: {query_type} | Complexity: {complexity.upper()} | "
+              f"top_k={r_top_k}, max_hops={r_max_hops}")
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         if verbose:
@@ -213,18 +345,33 @@ def agentic_query(query, index, embedder, passages,
             if iteration > 1:
                 print(f"Reformulated query: {current_query}")
 
-        # ── RETRIEVAL (adaptive based on query type × level) ──
-        if query_type == "COMPARISON":
-            retrieved = retrieve_comparison(current_query, index, embedder, passages,
-                                            top_k=r_top_k)
-        elif query_type == "MULTI_HOP":
-            retrieved = retrieve_multi_hop(current_query, index, embedder, passages,
-                                           top_k=r_top_k, max_hops=r_max_hops)
+        # ── RETRIEVAL (Stage 3 adaptive) ──────────────────────────────────────
+        # Iteration 1: full Stage 3 pipeline — complexity-aware budget + coverage
+        #   check + expansion before handing context to the LLM.
+        # Iterations 2+: targeted re-retrieval with reformulated query, merged
+        #   with the accumulated context pool from previous iterations so the LLM
+        #   always sees the best evidence gathered across the whole agentic loop.
+        if iteration == 1:
+            pool, context_passages, bridge_ctx, ret_stats = \
+                adaptive_retrieve_with_coverage_check(
+                    current_query, query_type,
+                    index, embedder, passages,
+                    budget, verbose=verbose,
+                )
+            retrieved = pool
+            if verbose:
+                print(f"  [Stage 3] conf={ret_stats['confidence']:.3f} "
+                      f"cov={ret_stats['coverage']:.2f} "
+                      f"expansions={ret_stats['expansions_used']}")
         else:
-            retrieved = retrieve_simple(current_query, index, embedder, passages,
-                                        top_k=r_top_k)
+            # Reformulated query — use dispatch helper, then merge + rerank
+            retrieved, bridge_ctx = _retrieve_for_type(
+                current_query, query_type,
+                index, embedder, passages,
+                r_top_k, r_max_hops,
+            )
 
-        # Merge with previously retrieved passages (Ct-1 ∪ {dt})
+        # Accumulate passages across iterations (Ct-1 ∪ {dt})
         seen_titles = {p["title"] for p in all_retrieved}
         for p in retrieved:
             if p["title"] not in seen_titles:
@@ -237,21 +384,54 @@ def agentic_query(query, index, embedder, passages,
             for i, p in enumerate(retrieved[:3]):
                 print(f"  [{i+1}] {p['title']} (score: {p.get('score', 0):.4f})")
 
-        # ── GENERATION ──
-        # Sort accumulated context by retrieval score so the best passages from
-        # any iteration are always in the top-K window sent to the LLM.
-        # Previously this used insertion order, meaning good passages retrieved
-        # after reformulation were silently dropped when all_retrieved > TOP_K.
-        pool = sorted(
-            all_retrieved, key=lambda p: p.get("score", 0), reverse=True
-        )[:TOP_K * 2]
-        context_passages = rerank_passages(query, pool, top_k=TOP_K)
-        answer = generate_answer(query, context_passages, query_type=query_type)
+        # ── BUILD CONTEXT FOR GENERATION ──────────────────────────────────────
+        # Iteration 1: context_passages already built by Stage 3 (with reranking).
+        # Iterations 2+: sort accumulated pool by score, rerank to TOP_K.
+        if iteration > 1:
+            acc_pool = sorted(
+                all_retrieved, key=lambda p: p.get("score", 0), reverse=True
+            )[:r_top_k * 2]
+            context_passages = rerank_passages(query, acc_pool, top_k=TOP_K)
 
-        # Fix 4: if MULTI_HOP retrieval fixated on a missing entity and the LLM
-        # refused to answer, fall back to simple retrieval on the full query.
-        # Other entity signals in the question (directors, co-stars, etc.) may
-        # still find the correct passage even when the specific named person is absent.
+        # Bridge context from multi-hop decomposition is injected AFTER reranking
+        # so the cross-encoder scores real Wikipedia passages only.
+        llm_context = list(context_passages)
+        if bridge_ctx:
+            llm_context = [{"title": "Bridge Finding", "text": bridge_ctx}] + llm_context
+
+        # ── GENERATION (Stage 1) ───────────────────────────────────────────────
+        answer = generate_answer(query, llm_context, query_type=query_type)
+
+        # Gate-fired refusal rescue (iteration 1 only): the escalation gate
+        # downgraded MULTI_HOP -> SIMPLE, but SIMPLE produced no answer.
+        # The cross-encoder gave a false-positive confidence on a passage that
+        # looked topically relevant but didn't contain the 2-hop answer chain.
+        # Rescue: run full MULTI_HOP on this iteration and lock in MULTI_HOP
+        # for the rest of the loop.
+        if iteration == 1 and _s4_gate_fired and _is_refusal(answer):
+            if verbose:
+                print("[Fallback] Gate-SIMPLE refusal — escalating loop to MULTI_HOP")
+            mh_budget  = _BUDGET.get(("MULTI_HOP", complexity), _DEFAULT_BUDGET["MULTI_HOP"])
+            mh_pool, mh_ctx, mh_bridge, _ = adaptive_retrieve_with_coverage_check(
+                query, "MULTI_HOP", index, embedder, passages, mh_budget, verbose,
+            )
+            mh_llm = list(mh_ctx)
+            if mh_bridge:
+                mh_llm = [{"title": "Bridge Finding", "text": mh_bridge}] + mh_llm
+            mh_answer = generate_answer(query, mh_llm, query_type="MULTI_HOP")
+            if not _is_refusal(mh_answer):
+                answer           = mh_answer
+                context_passages = mh_ctx
+                llm_context      = mh_llm
+                bridge_ctx       = mh_bridge
+                # Switch the loop to MULTI_HOP for remaining iterations
+                _s4_gate_fired   = False
+                query_type       = "MULTI_HOP"
+                budget           = mh_budget
+                r_top_k          = mh_budget["top_k"]
+                r_max_hops       = mh_budget["max_hops"]
+
+        # MULTI_HOP iteration refusal: fall back to simple retrieval on full query.
         if query_type == "MULTI_HOP" and _is_refusal(answer):
             if verbose:
                 print("[Fallback] Multi-hop refusal — retrying with simple retrieval")
@@ -272,6 +452,29 @@ def agentic_query(query, index, embedder, passages,
         verification = verify(context_text, answer, verifier_model, verifier_tokenizer, question=query)
         label      = verification["label"]
         confidence = verification["confidence"]
+
+        # ── YES/NO FLIP ──
+        # When the LLM answers "Yes" or "No" but verifier support is near-zero,
+        # the opposite answer may be correct. This catches comparison questions
+        # where the LLM defaults to "Yes" (both buildings are office towers =
+        # "real estate") but the gold answer requires distinguishing the specific
+        # USE (publishing HQ != real estate company). Try the opposite and take
+        # whichever answer the verifier supports more strongly.
+        _ans_lower = answer.strip().lower().rstrip(".")
+        if _ans_lower in ("yes", "no") and verification["scores"].get("SUPPORTED", 1.0) < LOW_SUPPORT_THRESHOLD:
+            _opposite     = "No" if _ans_lower == "yes" else "Yes"
+            _opp_ctx      = build_verify_context(context_passages, _opposite)
+            _opp_verif    = verify(_opp_ctx, _opposite, verifier_model, verifier_tokenizer, question=query)
+            _orig_supp    = verification["scores"].get("SUPPORTED", 0.0)
+            _opp_supp     = _opp_verif["scores"].get("SUPPORTED", 0.0)
+            if _opp_supp > _orig_supp:
+                if verbose:
+                    print(f"[Yes/No flip] '{answer}' supp={_orig_supp:.3f} < "
+                          f"'{_opposite}' supp={_opp_supp:.3f} — flipping answer")
+                answer       = _opposite
+                verification = _opp_verif
+                label        = _opp_verif["label"]
+                confidence   = _opp_verif["confidence"]
 
         if verbose:
             icon = {"SUPPORTED": "✅", "PARTIAL": "⚠️", "UNSUPPORTED": "❌"}.get(label, "?")
@@ -296,29 +499,29 @@ def agentic_query(query, index, embedder, passages,
         # ── DECISION ──
         scores = verification.get("scores", {})
 
+        # Track whether the LLM judge already ran this iteration (prevents double-
+        # judging: SUPPORTED→judge→PARTIAL then PARTIAL path runs judge again on
+        # the same answer, causing correct answers to be rejected twice).
+        judge_ran_this_iter = False
+
         # ── LLM JUDGE (MULTI_HOP / COMPARISON only) ──────────────────────────
-        # DistilBERT verifier checks text overlap — it cannot verify that a named
-        # entity appears in the CORRECT ROLE (e.g. "David Martínez" in context but
-        # not as a Mexican F1 podium finisher).  For complex query types, run a
-        # fast YES/NO LLM check before accepting a SUPPORTED verdict.
-        # If the judge disagrees, force a low support score to trigger retry.
         if (label == "SUPPORTED"
                 and confidence >= CONFIDENCE_THRESHOLD
                 and query_type in ("MULTI_HOP", "COMPARISON")):
             judge_ok = llm_judge_supported(query, answer, context_passages, verbose)
+            judge_ran_this_iter = True
             if not judge_ok:
                 if verbose:
                     print(f"[LLM Judge] Overriding SUPPORTED → forcing retry "
                           f"(entity not in correct role in context)")
-                # Swap scores so best_candidate and abstain display are honest
                 orig = scores
                 scores = {
-                    "SUPPORTED":   orig["PARTIAL"],    # low
-                    "PARTIAL":     orig["SUPPORTED"],  # high → shows hallucination
+                    "SUPPORTED":   orig["PARTIAL"],
+                    "PARTIAL":     orig["SUPPORTED"],
                     "UNSUPPORTED": orig["UNSUPPORTED"],
                 }
                 label      = "PARTIAL"
-                confidence = orig["SUPPORTED"]         # high confidence in PARTIAL label
+                confidence = orig["SUPPORTED"]
                 verification = {**verification, "label": "PARTIAL",
                                 "confidence": confidence, "scores": scores}
 
@@ -329,6 +532,8 @@ def agentic_query(query, index, embedder, passages,
             return {
                 "query":          query,
                 "query_type":     query_type,
+                "complexity":     complexity,
+                "level":          complexity,    # kept for Stage 5 API compat
                 "answer":         answer,
                 "status":         "SUPPORTED",
                 "iterations":     iteration,
@@ -340,37 +545,60 @@ def agentic_query(query, index, embedder, passages,
         elif label == "PARTIAL":
             support_score = verification.get("scores", {}).get("SUPPORTED", 1.0)
             if support_score < LOW_SUPPORT_THRESHOLD:
-                # Effectively hallucinated — don't accept this answer.
-                if iteration < MAX_ITERATIONS:
-                    # Iterations remain: reformulate and retry.
+                # Support score is very low — DistilBERT may be under-scoring a correct
+                # short factoid answer (known calibration issue).
+                # Run LLM judge to confirm UNLESS it already ran this iteration
+                # (SUPPORTED→judge→PARTIAL swap above), which would cause double-rejection
+                # of the same correct answer.
+                judge_ok = False
+                if not judge_ran_this_iter:
                     if verbose:
-                        print(f"PARTIAL but support score only {support_score:.3f} "
-                              f"(< {LOW_SUPPORT_THRESHOLD}) — retrying.")
+                        print(f"PARTIAL with low support ({support_score:.3f}) — "
+                              f"running LLM judge before retrying...")
+                    judge_ok = llm_judge_supported(query, answer, context_passages, verbose)
+                elif verbose:
+                    print(f"PARTIAL with low support ({support_score:.3f}) — "
+                          f"judge already ran this iteration, skipping re-check.")
+                if judge_ok:
+                    if verbose:
+                        print(f"[LLM Judge] Answer confirmed correct — returning BEST_EFFORT "
+                              f"(verifier under-scored a correct short answer).")
+                    return {
+                        "query":         query,
+                        "query_type":    query_type,
+                        "complexity":    complexity,
+                        "level":         complexity,
+                        "answer":        answer,
+                        "status":        "BEST_EFFORT",
+                        "iterations":    iteration,
+                        "abstained":     False,
+                        "verification":  verification,
+                        "iteration_log": iteration_log,
+                    }
+                # Judge says NO → genuinely low-quality answer, reformulate and retry
+                if iteration < MAX_ITERATIONS:
+                    if verbose:
+                        print(f"[LLM Judge] Answer rejected — reformulating for iteration {iteration+1}.")
                     current_query = reformulate_query(query, iteration, retrieved, answer)
                     continue
                 else:
-                    # Final iteration still has low support: fall through.
-                    # No return / continue here → the for loop ends naturally
-                    # → code reaches the ABSTAIN block below.
                     if verbose:
-                        print(f"PARTIAL with low support score ({support_score:.3f}) "
-                              f"on final iteration — abstaining.")
+                        print(f"PARTIAL with low support on final iteration — abstaining.")
             else:
-                # Support score is acceptable → grounded BEST_EFFORT.
-                # Short factoid answers always get PARTIAL because DistilBERT checks
-                # verbatim grounding; the LLM judge already caught role-mismatch
-                # hallucinations upstream, so any PARTIAL reaching here is grounded.
+                # Support score acceptable → grounded BEST_EFFORT.
                 if verbose:
                     print(f"\n⚠️  PARTIAL → BEST_EFFORT after {iteration} iteration(s).")
                 return {
-                    "query":          query,
-                    "query_type":     query_type,
-                    "answer":         answer,
-                    "status":         "BEST_EFFORT",
-                    "iterations":     iteration,
-                    "abstained":      False,
-                    "verification":   verification,
-                    "iteration_log":  iteration_log,
+                    "query":         query,
+                    "query_type":    query_type,
+                    "complexity":    complexity,
+                    "level":         complexity,
+                    "answer":        answer,
+                    "status":        "BEST_EFFORT",
+                    "iterations":    iteration,
+                    "abstained":     False,
+                    "verification":  verification,
+                    "iteration_log": iteration_log,
                 }
 
         elif iteration < MAX_ITERATIONS:
@@ -431,18 +659,93 @@ def agentic_query(query, index, embedder, passages,
             if verbose:
                 print(f"[Rescue] Answer: {rescue_answer}  support: {rescue_support:.3f}")
             if rescue_support >= LOW_SUPPORT_THRESHOLD:
-                return {
-                    "query":         query,
-                    "query_type":    query_type,
-                    "answer":        rescue_answer,
-                    "status":        "BEST_EFFORT",
-                    "iterations":    MAX_ITERATIONS,
-                    "abstained":     False,
-                    "verification":  rescue_verif,
-                    "iteration_log": iteration_log,
-                }
+                # Reject immediately if the answer type is wrong (e.g. a place
+                # name for a population question) -- no point asking the judge.
+                if _answer_type_mismatch(query, rescue_answer):
+                    if verbose:
+                        print(f"[Rescue] Answer type mismatch "
+                              f"('{rescue_answer[:40]}' for a numeric question) -- abstaining.")
+                    rescue_support = -1.0   # force skip of judge block below
 
-    # ── ABSTAIN: all iterations returned UNSUPPORTED ──
+                # Always gate on the LLM judge -- no support-score bypass.
+                rescue_judge_ok = rescue_support >= 0 and llm_judge_supported(
+                    query, rescue_answer, rescue_ctx, verbose
+                )
+                if rescue_judge_ok:
+                    if verbose:
+                        print(f"[Rescue] Judge approved ({rescue_support:.3f}) — "
+                              f"returning BEST_EFFORT.")
+                    return {
+                        "query":         query,
+                        "query_type":    query_type,
+                        "answer":        rescue_answer,
+                        "status":        "BEST_EFFORT",
+                        "iterations":    MAX_ITERATIONS,
+                        "abstained":     False,
+                        "verification":  rescue_verif,
+                        "iteration_log": iteration_log,
+                    }
+                elif verbose:
+                    print(f"[Rescue] LLM judge rejected rescue answer — abstaining.")
+
+    # ── CONSENSUS CHECK + BEST_EFFORT ─────────────────────────────────────────
+    # Before returning BEST_EFFORT, verify that the agentic loop converged.
+    #
+    # The verifier measures passage-answer consistency, NOT world-knowledge
+    # correctness.  When wrong passages are retrieved, wrong answers receive
+    # high verifier support (e.g. 95%).  Iteration CONSISTENCY is a stronger
+    # signal: if 5 independent retrieval-generation attempts all give the same
+    # answer, it is much more likely to be correct than if they give 3 different
+    # answers (which indicates the pipeline is guessing from ambiguous evidence).
+    #
+    # Rule: require >= CONSENSUS_THRESHOLD fraction of non-refusal iterations to
+    # agree before returning BEST_EFFORT.  When the loop has not converged,
+    # ABSTAIN — a known abstention is more honest than a confident wrong answer.
+    if best_candidate and best_candidate.get("label") in ("PARTIAL", "SUPPORTED"):
+        majority_ans, consensus_ratio = _majority_answer(iteration_log)
+
+        if verbose:
+            print(f"\n[Consensus] ratio={consensus_ratio:.2f} "
+                  f"(threshold={CONSENSUS_THRESHOLD}) "
+                  f"majority='{majority_ans[:60]}'")
+
+        # Answer type mismatch: question asks for a number but answer has none.
+        # Consensus can be 100% on a wrong-type answer (all iterations found the
+        # intermediate entity but missed the numeric fact), so this check runs
+        # independently of the consensus ratio.
+        if majority_ans and _answer_type_mismatch(query, majority_ans):
+            if verbose:
+                print(f"[Type check] Question expects a numeric answer but got "
+                      f"'{majority_ans[:60]}' -- abstaining.")
+
+        elif consensus_ratio < CONSENSUS_THRESHOLD:
+            # Iterations disagree — the loop drifted between different answers.
+            # This is proof the pipeline is uncertain regardless of verifier scores.
+            if verbose:
+                print(f"[Consensus] No majority ({consensus_ratio:.0%} < "
+                      f"{CONSENSUS_THRESHOLD:.0%}) — abstaining instead of "
+                      f"returning fabricated BEST_EFFORT.")
+        else:
+            # Sufficient consensus: use the majority answer (may differ from
+            # best_candidate if later iterations drifted to a better answer).
+            chosen = majority_ans if majority_ans else best_candidate["answer"]
+            if verbose:
+                print(f"[Consensus] Majority reached ({consensus_ratio:.0%}) — "
+                      f"returning BEST_EFFORT: '{chosen[:60]}'")
+            return {
+                "query":         query,
+                "query_type":    query_type,
+                "complexity":    complexity,
+                "level":         complexity,
+                "answer":        chosen,
+                "status":        "BEST_EFFORT",
+                "iterations":    MAX_ITERATIONS,
+                "abstained":     False,
+                "verification":  best_candidate["verification"],
+                "iteration_log": iteration_log,
+            }
+
+    # ── ABSTAIN: every iteration returned UNSUPPORTED ──
     if verbose:
         print(f"\n❌ Could not verify an answer after {MAX_ITERATIONS} iterations.")
         print("Abstaining — returning explicit 'insufficient evidence' response.")
@@ -450,6 +753,8 @@ def agentic_query(query, index, embedder, passages,
     return {
         "query":         query,
         "query_type":    query_type,
+        "complexity":    complexity,
+        "level":         complexity,
         "answer":        "I cannot confidently answer this question based on the available evidence.",
         "status":        "ABSTAINED",
         "iterations":    MAX_ITERATIONS,
@@ -585,17 +890,21 @@ def evaluate_all_stages(index, embedder, passages,
         gold   = example["answer"]
         qtype  = classify_query(query)
 
-        # ── Stage 1: Basic RAG (no verification) ──
-        s1_retrieved = retrieve_simple(query, index, embedder, passages)
-        s1_answer    = generate_answer(query, s1_retrieved)
+        # ── Stage 1: Basic RAG — uses the full hybrid+rerank pipeline ──
+        # Must use _s1_rag_query (retrieve_hybrid→rerank→generate) not bare
+        # retrieve_simple, otherwise the Stage 1 baseline is weaker than what
+        # Stage 1 actually produces and the comparison table is misleading.
+        s1_result    = _s1_rag_query(query, index, embedder, passages)
+        s1_answer    = s1_result["answer"]
+        s1_retrieved = s1_result["retrieved_passages"]
         s1_ctx       = build_verify_context(s1_retrieved, s1_answer)
         s1_verif     = verify(s1_ctx, s1_answer, verifier_model, verifier_tokenizer, question=query)
         s1_halluc    = 1 if s1_verif["label"] in ("PARTIAL", "UNSUPPORTED") else 0
 
-        # ── Stage 2: Basic RAG + Verifier (no re-retrieval) ──
-        # Same retrieval as Stage 1 but with verification label
-        s2_answer  = s1_answer   # same answer, just now verified
-        s2_halluc  = s1_halluc   # same hallucination check
+        # ── Stage 2: Same retrieval as Stage 1 + Verifier label shown ──
+        # Stage 2's contribution is the verifier; retrieval is identical to Stage 1.
+        s2_answer  = s1_answer
+        s2_halluc  = s1_halluc
 
         # ── Stage 3: Adaptive Retrieval + Verifier ──
         if qtype == "COMPARISON":

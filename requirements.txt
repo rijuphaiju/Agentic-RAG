@@ -13,6 +13,9 @@ faiss-cpu>=1.8.0        # use faiss-gpu if you have CUDA GPU
 # Ollama Python client
 ollama>=0.2.0
 
+# Hybrid retrieval
+rank-bm25>=0.2.2
+
 # Utilities
 numpy>=1.24.0
 tqdm>=4.66.0
