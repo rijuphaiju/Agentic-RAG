@@ -46,7 +46,7 @@ from Stage_1_RAG_Pipeline import (
 )
 from Stage_3_Adaptive_Retrieval import adaptive_rag_query as run_s3
 from Stage_4_Agentic_Loop import agentic_query as run_s4
-from Stage_2_Verifier_GPU import load_verifier, verify, build_verify_context, VERIFIER_PATH
+from Stage_2_Verifier import load_verifier, verify, legacy_scores, VERIFIER_PATH
 
 
 # ── Shared pipeline state (loaded once at startup) ──
@@ -166,16 +166,16 @@ async def lifespan(app: FastAPI):
     print(f"Loading embedding model: {EMBED_MODEL}")
     _pipeline["embedder"] = SentenceTransformer(EMBED_MODEL)
 
-    print("Loading verifier...")
-    if os.path.exists(VERIFIER_PATH):
+    print("Loading verifier (Stage 2 V2 — pretrained NLI, no local checkpoint needed)...")
+    try:
         vm, vt = load_verifier(VERIFIER_PATH)
         _pipeline["verifier_model"]     = vm
         _pipeline["verifier_tokenizer"] = vt
         print("Verifier loaded.")
-    else:
+    except Exception:
         _pipeline["verifier_model"]     = None
         _pipeline["verifier_tokenizer"] = None
-        print("Verifier not found — Stage 4 will be unavailable.")
+        print("Verifier failed to load (see traceback above) — stages 2-4 will be unavailable.")
 
     print("API ready at http://localhost:8000\n")
     yield
@@ -236,31 +236,36 @@ def chat(req: ChatRequest):
 
     elif req.stage == "stage2":
         vm = _pipeline.get("verifier_model")
-        vt = _pipeline.get("verifier_tokenizer")
         if vm is None:
             raise HTTPException(
                 status_code=503,
-                detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
+                detail="Verifier model not loaded — check server startup logs.",
             )
-        # Stage 2 = Stage 1 retrieval + generation, then the verifier classifies
-        # the answer.  It does NOT run its own separate retrieval — doing so would
-        # retrieve different passages and generate a different answer, making
-        # Stage 2 incomparable to Stage 1 in the paper's Table 6.2.
+        # Stage 2 = Stage 1 retrieval + generation, then the verifier checks
+        # the answer against evidence. It does NOT run its own separate
+        # retrieval — doing so would retrieve different passages and
+        # generate a different answer, making Stage 2 incomparable to
+        # Stage 1 in the paper's Table 6.2.
         s1_result   = run_s1(req.question, ex_index, embedder, ex_passages, bm25=ex_bm25)
         answer      = s1_result["answer"]
         s1_passages = s1_result["retrieved_passages"]
 
-        ctx          = build_verify_context(s1_passages, answer)
-        verification = verify(ctx, answer, vm, vt, question=req.question)
-        scores       = {k: round(float(v), 4) for k, v in verification["scores"].items()}
+        report        = verify(req.question, answer, s1_passages, vm)
+        support_score = report["support_score"]
 
         return ChatResponse(
             answer=answer,
             stage="stage2",
             metadata={
-                "label":            verification["label"],
-                "confidence":       round(float(verification["confidence"]), 4),
-                "scores":           scores,
+                # Backward-compatible fields existing clients already read:
+                "label":            report["overall_status"],
+                "confidence":       round(float(report["overall_confidence"]), 4),
+                "support_score":    round(float(support_score), 4),
+                "scores":           legacy_scores(report["overall_status"], support_score),
+                # Additive — failure_reason/recommended_action/claims/etc:
+                "failure_reason":     report.get("failure_reason"),
+                "recommended_action": report.get("recommended_action"),
+                "verification":     report,
                 "eval":             _live_metrics(answer, gold_ans),
                 "retrieved_titles": [p["title"] for p in s1_passages],
             },
@@ -272,23 +277,22 @@ def chat(req: ChatRequest):
         if vm is None:
             raise HTTPException(
                 status_code=503,
-                detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
+                detail="Verifier model not loaded — check server startup logs.",
             )
-        # Minimum compatibility layer (Stage 3 has not been redesigned yet):
-        # adaptive_rag_query() still expects a shared (index, embedder, passages)
-        # triple, so we hand it this request's own temporary per-question corpus
-        # instead of a global one — its internal retrieval stays correctly scoped
-        # to just this question. One known limitation: any retrieve_hybrid() call
-        # inside Stage 3 that doesn't pass bm25 explicitly will run dense-only for
-        # this request, since the module-level BM25 fallback is intentionally
-        # never populated here (populating it globally would not be
-        # request-safe for a concurrent API server). Acceptable for now — Stage 3
-        # will be redesigned separately.
+        # Stage 3 is now redesigned to match this architecture directly: it
+        # receives this request's own temporary per-question corpus AND the
+        # matching per-question bm25 object, so its adaptive retrieval planner
+        # runs full hybrid (dense + BM25 + RRF) retrieval scoped to just this
+        # question — no global BM25 fallback involved anywhere.
         result = run_s3(req.question, ex_index, embedder, ex_passages, vm, vt, verbose=False,
                         query_type_override=meta.get("type"),
-                        level_override=meta.get("level"))
+                        level_override=meta.get("level"),
+                        bm25=ex_bm25)
+        # Stage 3 now returns Stage 2 V2's native report directly
+        # (overall_status/overall_confidence/support_score/failure_reason/
+        # recommended_action/claims/question_intent — no legacy shape left).
         verif  = result.get("verification") or {}
-        scores = {k: round(float(v), 4) for k, v in verif.get("scores", {}).items()}
+        scores = legacy_scores(verif.get("overall_status", "UNSUPPORTED"), verif.get("support_score", 0.0))
         return ChatResponse(
             answer=result["answer"],
             stage="stage3",
@@ -298,9 +302,15 @@ def chat(req: ChatRequest):
                 "retrieval_strategy": result["retrieval_strategy"],
                 "retrieval_params":   result["retrieval_params"],
                 "num_retrieved":      result["num_retrieved"],
-                "label":              verif.get("label", "UNKNOWN"),
-                "confidence":         round(float(verif.get("confidence", 0)), 4),
+                # Backward-compatible fields existing clients already read:
+                "label":              verif.get("overall_status", "UNKNOWN"),
+                "confidence":         round(float(verif.get("overall_confidence", 0)), 4),
+                "support_score":      round(float(verif.get("support_score", 0)), 4),
                 "scores":             scores,
+                # Additive — failure_reason/recommended_action/claims/etc:
+                "failure_reason":     verif.get("failure_reason"),
+                "recommended_action": verif.get("recommended_action"),
+                "verification":       verif,
                 "eval":               _live_metrics(result["answer"], gold_ans),
                 "retrieved_titles":   [p["title"] for p in result["retrieved"][:10]],
             },
@@ -312,43 +322,29 @@ def chat(req: ChatRequest):
         if vm is None:
             raise HTTPException(
                 status_code=503,
-                detail="Verifier model not loaded. Run: python Stage_2_Verifier_GPU.py --mode train",
+                detail="Verifier model not loaded — check server startup logs.",
             )
 
-        # Run Stage 3 first so Stage 4 starts from Stage 3's retrieved passages
-        # and verified answer instead of re-retrieving from scratch. Same
-        # minimum-compatibility-layer note as the stage3 branch above applies.
-        s3_result = run_s3(req.question, ex_index, embedder, ex_passages, vm, vt, verbose=False,
-                           query_type_override=meta.get("type"),
-                           level_override=meta.get("level"))
-        s3_label   = (s3_result.get("verification") or {}).get("label", "UNSUPPORTED")
-        s3_answer  = s3_result.get("answer", "")
-        s3_qtype   = s3_result.get("query_type")
+        # Stage 4 now calls Stage 3 internally exactly once as its own initial
+        # state, so there's no need to run Stage 3 separately here first (the
+        # old code did, then patched the result back in if Stage 4 "downgraded"
+        # it — that compensating logic is now obsolete: Stage 4's own
+        # best-candidate tracking spans its whole episode, including that
+        # internal Stage 3 call, so it can never return worse than Stage 3
+        # would have on its own). Running Stage 3 twice here would have just
+        # doubled the retrieval/generation cost for every Stage 4 request.
+        result = run_s4(req.question, ex_index, embedder, ex_passages, vm, vt, verbose=False,
+                        query_type_override=meta.get("type"),
+                        level_override=meta.get("level"),
+                        bm25=ex_bm25)
 
-        # Every question reaching this point already matched a loaded HotpotQA
-        # example (see _lookup_example, which 404s otherwise) — unlike the old
-        # open-domain design, there is no "question outside the dataset"
-        # abstention branch needed here anymore.
-        if s3_label == "SUPPORTED":
-            result = run_s4(req.question, ex_index, embedder, ex_passages, vm, vt, verbose=False,
-                            query_type_override=s3_qtype or meta.get("type"),
-                            level_override=meta.get("level"))
-            # Stage 4 did not independently verify — fall back to Stage 3's answer
-            s4_label = (result.get("verification") or {}).get("label", "UNSUPPORTED")
-            if s4_label != "SUPPORTED":
-                result["answer"]       = s3_answer
-                result["status"]       = "SUPPORTED"
-                result["abstained"]    = False
-                result["verification"] = s3_result.get("verification", {})
-        else:
-            result = run_s4(req.question, ex_index, embedder, ex_passages, vm, vt, verbose=False,
-                            query_type_override=s3_qtype or meta.get("type"),
-                            level_override=meta.get("level"))
-
-        # Convert numpy/torch scalars → native Python floats for JSON serialization
-        # result["verification"] may be {} when all iterations were UNSUPPORTED (abstain)
-        raw_scores = result["verification"].get("scores", {"SUPPORTED": 0.0, "PARTIAL": 0.0, "UNSUPPORTED": 1.0})
-        scores = {k: float(v) for k, v in raw_scores.items()}
+        # result["verification"] is already Stage 2 V2's report shape (or {}
+        # when every action in the episode was UNSUPPORTED and the agent
+        # abstained from the start) — synthesize the backward-compatible
+        # label/confidence/scores fields from it for existing clients.
+        verif = result["verification"] or {}
+        support_score = verif.get("support_score", 0.0)
+        scores = legacy_scores(verif.get("overall_status", "UNSUPPORTED"), support_score)
         iter_log = [
             {
                 "iteration":    it["iteration"],
@@ -368,7 +364,16 @@ def chat(req: ChatRequest):
                 "status":              result["status"],
                 "query_type":          result["query_type"],
                 "iterations":          int(result["iterations"]),
+                # Backward-compatible fields existing clients already read:
                 "verification_scores": scores,
+                "confidence":          round(float(verif.get("overall_confidence", 0.0)), 4),
+                "support_score":       round(float(support_score), 4),
+                # Additive — the full structured report, including claims/coverage:
+                "failure_reason":      verif.get("failure_reason"),
+                "recommended_action":  verif.get("recommended_action"),
+                "verification":        verif,
+                "actions_selected":    result.get("actions_selected", []),
+                "recovered_via":       result.get("recovered_via"),
                 "iteration_log":       iter_log,
                 "eval":                _live_metrics(result["answer"], gold_ans),
             },

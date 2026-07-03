@@ -1,34 +1,51 @@
 """
-Stage 3: Adaptive Retrieval
-===========================
+Stage 3: Adaptive Retrieval Planner
+====================================
 Project: HARA — Hallucination-Aware Retrieval Agent
 Proposal Section: 2.5, 4.3, 6.3.3
 
-Builds on Stage 1 (rag_pipeline.py) and Stage 2 (verifier_gpu.py).
+Builds on Stage 1 (Stage_1_RAG_Pipeline.py) and Stage 2 (Stage_2_Verifier_GPU.py).
 
-Three retrieval strategies selected by query complexity classifier:
-  SIMPLE     → standard top-k retrieval (single hop)
-  MULTI_HOP  → iterative retrieval with query decomposition
-  COMPARISON → parallel retrieval for both entities being compared
+Architecture: official HotpotQA distractor protocol, matching the redesigned
+Stage 1/2/5. There is no global FAISS index and no global BM25 — every request
+builds a temporary per-question corpus via Stage 1's build_example_corpus(),
+retrieves adaptively from just that corpus, and discards it afterward.
+
+Stage 3's contribution is NOT "retrieve more" — it is that different questions
+run genuinely different retrieval ALGORITHMS, not just different parameter
+values plugged into one generic retrieval function. The Adaptive Retrieval
+Planner selects one of nine named retrieval pipelines based on
+(question type × difficulty), where difficulty controls which processing
+STAGES run (plain hybrid retrieval vs. coverage-gated targeted expansion vs.
+full bridge/entity discovery), not merely top_k/max_hops/max_expansions
+values fed into a single generic function.
+
+Question types (HotpotQA ground truth when available, else classify_query()):
+  SIMPLE     → standard hybrid retrieval, optionally coverage-expanded
+  MULTI_HOP  → bridge-aware retrieval, escalating from plain hybrid (easy) to
+               cheap bridge-entity detection (medium) to full sub-question
+               decomposition (hard)
+  COMPARISON → parallel per-entity retrieval, escalating to targeted
+               attribute-specific re-querying for the harder tier
+
+After generation and Stage 2 verification, Stage 3 may perform AT MOST ONE
+verifier-guided retrieval refinement (escalate to a harder pipeline, retrieve
+again, regenerate, re-verify, return) — this is deliberately capped at a
+single retry so Stage 3 stays clearly distinct from Stage 4's genuinely
+iterative agentic loop.
 
 Usage:
-  python adaptive_retrieval.py
+  python Stage_3_Adaptive_Retrieval.py
 """
 
 import json
 import math
-import os
-import pickle
 import re
 import sys
 from collections import Counter, defaultdict
 
-import faiss
-import numpy as np
-import ollama
 import torch
-from sentence_transformers import SentenceTransformer
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from tqdm import tqdm
 
 try:
@@ -38,24 +55,24 @@ except Exception:
 
 # ── Stage 1 helpers ──
 from Stage_1_RAG_Pipeline import (
-    load_faiss_index,
-    build_faiss_index,
-    load_hotpotqa_passages,
+    build_example_corpus,
     generate_answer,
     rerank_passages,
     retrieve_hybrid,
     retrieve as _retrieve_dense,
-    normalize_answer,
     exact_match,
     llm_judge_supported,
-    INDEX_PATH,
-    PASSAGES_PATH,
+    compute_recall_at_k,
     EMBED_MODEL,
-    OLLAMA_MODEL,
+    RERANK_POOL,
 )
 
-# ── Stage 2 verifier ──
-from Stage_2_Verifier_GPU import load_verifier, verify, build_verify_context, VERIFIER_PATH
+# ── Stage 2 verifier (V2: evidence-grounded self-verification) ──
+# Native interface — verify(question, answer, passages, nli_verifier) —
+# returns the full structured report (overall_status, overall_confidence,
+# support_score, failure_reason, recommended_action, claims, question_intent,
+# etc.) directly, no legacy verify_legacy()/build_verify_context() shim.
+from Stage_2_Verifier import load_verifier, verify, VERIFIER_PATH
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -64,13 +81,12 @@ DEVICE      = ("cuda" if torch.cuda.is_available()
                else "mps" if torch.backends.mps.is_available()
                else "cpu")
 TOP_K              = 10    # passages sent to LLM (post-rerank) — kept at 10 for Stage 4 compat
-TOP_K_MULTI        = 5     # passages per hop in multi-hop iterative retrieval
-MAX_HOPS           = 3     # maximum iterative hops
-LOW_SUPPORT_THRESHOLD = 0.15  # verifier P(SUPPORTED) below which multi-hop is retried
+TOP_K_MULTI        = 5     # passages per hop / per entity in multi-hop & comparison retrieval
+MAX_HOPS           = 3     # maximum iterative hops inside retrieve_multi_hop()
+LOW_SUPPORT_THRESHOLD = 0.15  # verifier P(SUPPORTED) below which one refinement retry fires
 
-# ── Complexity-aware adaptive retrieval constants ──
-MAX_COVERAGE_EXPANSIONS  = 2     # max extra retrieval rounds before giving up and generating
-RETRIEVAL_CONF_THRESHOLD = 0.45  # cross-encoder confidence below which budget is expanded
+# ── Coverage / confidence thresholds shared by every pipeline tier ──
+RETRIEVAL_CONF_THRESHOLD = 0.45  # cross-encoder confidence below which a tier expands
 COVERAGE_THRESHOLD       = 0.50  # fraction of key question entities that must appear in top-k
 
 
@@ -132,17 +148,9 @@ MULTI_HOP_PATTERNS = [
 def classify_query(query: str) -> str:
     """
     Rule-based query type classifier.  Returns 'SIMPLE', 'MULTI_HOP', or 'COMPARISON'.
-
-    Design principles (fixes vs prior version):
-      - "first/last/most/least" no longer unconditionally trigger COMPARISON.
-        They only trigger it when two explicit named entities are joined by "or"
-        (the "which X or Y" pattern), which is the actual HotpotQA pattern.
-      - Strong comparison words (older/newer/same/different/…) still trigger
-        COMPARISON, but the named-entity filter now excludes question-word
-        capitalizations (Who/What/Where/Which) so "Which" + "older" doesn't
-        cause a spurious COMPARISON label.
-      - MULTI_HOP patterns are checked AFTER COMPARISON, so bridging questions
-        that also contain comparison words route correctly.
+    Only used for questions outside the loaded HotpotQA benchmark — HotpotQA's own
+    ground-truth `type` field is always preferred when available (see
+    adaptive_rag_query's query_type_override).
     """
     q_lower = query.lower()
     tokens  = set(re.sub(r'[^\w\s]', '', q_lower).split())
@@ -191,7 +199,7 @@ def classify_query(query: str) -> str:
 # ─────────────────────────────────────────────
 # STEP 1b: COMPLEXITY ESTIMATOR
 # Independent of query TYPE — tells us HOW HARD
-# the retrieval task is, so the budget can scale.
+# the retrieval task is, so the right pipeline tier is chosen.
 # ─────────────────────────────────────────────
 _QW_SKIP = frozenset({
     "Who", "What", "Where", "When", "Which", "How",
@@ -203,8 +211,9 @@ _QW_SKIP = frozenset({
 def estimate_complexity(query: str) -> str:
     """
     Estimate query complexity as 'easy', 'medium', or 'hard'.
-    Used when HotpotQA ground-truth level is unavailable (interactive mode).
-    Returns the same scale as HotpotQA's example["level"] field.
+    Only used for questions outside the loaded HotpotQA benchmark — HotpotQA's
+    own ground-truth `level` field is always preferred when available (see
+    adaptive_rag_query's level_override).
 
     Scoring features:
       1. Token length  — longer questions are harder on average
@@ -259,14 +268,16 @@ def estimate_complexity(query: str) -> str:
 
 
 # ─────────────────────────────────────────────
-# STEP 2: RETRIEVAL STRATEGIES
+# STEP 2: RETRIEVAL STRATEGIES (building blocks — reused by every pipeline tier)
 # ─────────────────────────────────────────────
-def retrieve_simple(query, index, embedder, passages, top_k=TOP_K):
+def retrieve_simple(query, index, embedder, passages, top_k=TOP_K, bm25=None):
     """
-    Hybrid BM25 + dense retrieval when BM25 is initialised; dense-only fallback.
-    Used for SIMPLE queries and as the base retriever for all other strategies.
+    Hybrid BM25 + dense retrieval scoped to this question's own temporary
+    corpus. `bm25` is the per-question BM25Okapi instance build_example_corpus()
+    returned for this request — passed through explicitly so there is no
+    hidden fallback to a (now nonexistent) global BM25 object.
     """
-    return retrieve_hybrid(query, index, embedder, passages, top_k=top_k)
+    return retrieve_hybrid(query, index, embedder, passages, top_k=top_k, bm25=bm25)
 
 
 # ─────────────────────────────────────────────
@@ -339,11 +350,13 @@ def _decompose_multihop_query(query: str):
 
 
 def decompose_and_retrieve_multi_hop(query, index, embedder, passages,
-                                      top_k=TOP_K_MULTI):
+                                      top_k=TOP_K_MULTI, bm25=None):
     """
-    2-sub-question decomposition retrieval for MULTI_HOP (Stage 3 only).
+    2-sub-question decomposition retrieval — the "Bridge Entity Discovery +
+    Sub-question Generation + Hop 1 + Hop 2" mechanism used by the BRIDGE-hard
+    pipeline tier.
 
-    Key difference from the failed 2-step chain (previous attempt):
+    Key difference from a naive 2-step chain:
       - SQ2 retrieval is INDEPENDENT of the bridge answer.
         A wrong bridge answer degrades context quality but does NOT
         misdirect retrieval (the old failure mode).
@@ -352,18 +365,21 @@ def decompose_and_retrieve_multi_hop(query, index, embedder, passages,
         This means the CrossEncoder scores real Wikipedia passages, while
         the LLM still gets the intermediate finding as explicit context.
 
-    Falls back to iterative retrieve_multi_hop when no bridge pattern found.
+    Falls back to retrieve_multi_hop() (entity-anchored + iterative) when no
+    bridge pattern is found in the question — this is the "alternate bridge
+    discovery mechanism" for questions decompose_and_retrieve_multi_hop can't
+    parse structurally.
 
     Returns: (passages_list, bridge_context_str | None)
     """
     sq1, sq2 = _decompose_multihop_query(query)
 
     if sq1 is None:
-        # No bridging clause detected — iterative fallback
-        return retrieve_multi_hop(query, index, embedder, passages, top_k), None
+        # No bridging clause detected — fall back to entity-anchored + iterative retrieval
+        return retrieve_multi_hop(query, index, embedder, passages, top_k, bm25=bm25), None
 
-    # ── Sub-question 1: retrieve and answer the bridge ──
-    sq1_passages = retrieve_simple(sq1, index, embedder, passages, top_k=top_k)
+    # ── Sub-question 1 (Hop 1): retrieve and answer the bridge ──
+    sq1_passages = retrieve_simple(sq1, index, embedder, passages, top_k=top_k, bm25=bm25)
     bridge_answer = generate_answer(sq1, sq1_passages, query_type="SIMPLE")
 
     bridge_ctx = (
@@ -372,7 +388,7 @@ def decompose_and_retrieve_multi_hop(query, index, embedder, passages,
         f"Use this intermediate answer to help resolve the main question."
     )
 
-    # ── Sub-question 2: anchor retrieval on the bridge answer ──
+    # ── Sub-question 2 (Hop 2): anchor retrieval on the bridge answer ──
     # Previously sq2 was retrieved independently. Without knowing the bridge entity
     # (e.g., "Adriana Trigiani" for "the director of Big Stone Gap"), dense retrieval
     # for "The director is based in what New York city?" returns generic NYC articles
@@ -382,7 +398,7 @@ def decompose_and_retrieve_multi_hop(query, index, embedder, passages,
         sq2_query = f"{bridge_answer} {sq2}"
     else:
         sq2_query = sq2
-    sq2_passages = retrieve_simple(sq2_query, index, embedder, passages, top_k=top_k)
+    sq2_passages = retrieve_simple(sq2_query, index, embedder, passages, top_k=top_k, bm25=bm25)
 
     # Merge: sq2 passages first (directly relevant to final answer), then sq1 context
     seen     = {p["title"] for p in sq2_passages}
@@ -396,7 +412,7 @@ def decompose_and_retrieve_multi_hop(query, index, embedder, passages,
 
 
 def _extract_question_entities(query: str) -> list:
-    # Extract at most 2 anchor entities for Phase 1 entity-focused retrieval.
+    # Extract at most 2 anchor entities for entity-anchored parallel retrieval.
     #
     # Only quoted strings and multi-word proper nouns are used.
     # Single-word nouns ("Street", "Award") are excluded -- too ambiguous,
@@ -429,18 +445,14 @@ def _extract_question_entities(query: str) -> list:
 
 
 def retrieve_multi_hop(query, index, embedder, passages,
-                       top_k=TOP_K_MULTI, max_hops=MAX_HOPS):
+                       top_k=TOP_K_MULTI, max_hops=MAX_HOPS, bm25=None):
     """
     Multi-hop retrieval combining entity-anchored parallel search with iterative
-    reformulation.
+    reformulation. Used as the fallback bridge-discovery mechanism when
+    decompose_and_retrieve_multi_hop() can't parse a structural bridge pattern
+    out of the question.
 
-    The previous implementation only did iterative reformulation from the top
-    retrieved passage, which fails when:
-      1. The correct answer article is not reached in any hop (e.g., "US Route 60"
-         is not mentioned in the first chunk of the "Zilpo Road" article).
-      2. Reformulation drifts toward irrelevant entities in retrieved passages.
-
-    New strategy — two phases:
+    Two phases:
 
     Phase 1 — Entity-anchored parallel retrieval:
       Extract every named entity mentioned IN the question itself and search for
@@ -462,7 +474,7 @@ def retrieve_multi_hop(query, index, embedder, passages,
 
     for entity in question_entities[:4]:          # cap at 4 to keep latency reasonable
         entity_results = retrieve_simple(
-            entity, index, embedder, passages, top_k=top_k
+            entity, index, embedder, passages, top_k=top_k, bm25=bm25,
         )
         for p in entity_results:
             if p["title"] not in seen_titles:
@@ -471,7 +483,7 @@ def retrieve_multi_hop(query, index, embedder, passages,
                 all_retrieved.append(new_p)
 
     # Full-question search (covers questions with no extractable named entities)
-    full_results = retrieve_simple(query, index, embedder, passages, top_k=top_k)
+    full_results = retrieve_simple(query, index, embedder, passages, top_k=top_k, bm25=bm25)
     for p in full_results:
         if p["title"] not in seen_titles:
             seen_titles.add(p["title"])
@@ -511,7 +523,7 @@ def retrieve_multi_hop(query, index, embedder, passages,
         if current_query.strip().lower() == query.strip().lower():
             break  # reformulation produced no change — stop early
 
-        hop_results  = retrieve_simple(current_query, index, embedder, passages, top_k)
+        hop_results  = retrieve_simple(current_query, index, embedder, passages, top_k, bm25=bm25)
         new_passages = []
         for p in hop_results:
             if p["title"] not in seen_titles:
@@ -526,33 +538,43 @@ def retrieve_multi_hop(query, index, embedder, passages,
     return all_retrieved
 
 
+# Comparison-attribute keyword map — module level so both retrieve_comparison()
+# and the COMPARISON-hard pipeline's targeted attribute expansion can reuse it
+# without duplicating the mapping.
+_COMPARISON_ATTRIBUTE_MAP = {
+    r'\bolder\b|\byounger\b':                        "birth year age born",
+    r'\btaller\b|\bshorter\b':                       "height",
+    r'\bricher\b|\bwealthier\b':                     "net worth wealth",
+    r'\bnationality\b|\bcountry\b':                  "nationality country born",
+    r'\bsame language\b|\bboth from\b':              "origin country language",
+    r'\bearlier\b|\blater\b|\bfirst\b':              "founded started year",
+    r'\bawards?\b|\bwon\b|\bwins?\b|\baccolades?\b': "awards won wins accolades",
+    r'\balbums?\b|\bsongs?\b|\bhits?\b':             "albums discography songs",
+    r'\bgoals?\b|\bscored\b|\bpoints?\b':            "goals scored points career",
+    r'\bbooks?\b|\bnovels?\b|\bwritten\b':           "books written novels published",
+    r'\bbetter\b|\bworse\b|\bmore\b|\bless\b':       "comparison career achievements",
+}
+
+
 def retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI):
     """
     Parallel retrieval for comparison questions.
     Extracts the two entities being compared and retrieves
     passages for each independently, then combines results.
 
+    Deliberately dense-only, not hybrid: BM25 over-weights generic
+    "nationality/born/age" keyword documents instead of the specific entity's
+    Wikipedia bio page, which dense embedding finds correctly. This is an
+    intentional, preserved design choice — not something the BM25-threading
+    fix should touch.
+
     Used for COMPARISON queries like:
     'Were Scott Derrickson and Ed Wood of the same nationality?'
     """
     entities = _extract_entities(query)
 
-    # Extract the comparison attribute from the query (e.g. "older" → "birth year age")
-    attribute_map = {
-        r'\bolder\b|\byounger\b':                        "birth year age born",
-        r'\btaller\b|\bshorter\b':                       "height",
-        r'\bricher\b|\bwealthier\b':                     "net worth wealth",
-        r'\bnationality\b|\bcountry\b':                  "nationality country born",
-        r'\bsame language\b|\bboth from\b':              "origin country language",
-        r'\bearlier\b|\blater\b|\bfirst\b':              "founded started year",
-        r'\bawards?\b|\bwon\b|\bwins?\b|\baccolades?\b': "awards won wins accolades",
-        r'\balbums?\b|\bsongs?\b|\bhits?\b':             "albums discography songs",
-        r'\bgoals?\b|\bscored\b|\bpoints?\b':            "goals scored points career",
-        r'\bbooks?\b|\bnovels?\b|\bwritten\b':           "books written novels published",
-        r'\bbetter\b|\bworse\b|\bmore\b|\bless\b':       "comparison career achievements",
-    }
     attribute_suffix = ""
-    for pattern, suffix in attribute_map.items():
+    for pattern, suffix in _COMPARISON_ATTRIBUTE_MAP.items():
         if re.search(pattern, query, re.IGNORECASE):
             attribute_suffix = suffix
             break
@@ -561,9 +583,6 @@ def retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI):
     seen_titles   = set()
 
     if len(entities) >= 2:
-        # Dense-only per-entity retrieval: BM25 is counterproductive here because
-        # it over-weights generic "nationality/born/age" keyword documents instead of
-        # the specific entity's Wikipedia bio. Dense embedding finds the right bio page.
         for entity in entities[:2]:
             entity_query   = f"{entity} {attribute_suffix}".strip()
             entity_results = _retrieve_dense(
@@ -594,12 +613,15 @@ def retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI):
 # ─────────────────────────────────────────────
 def _reformulate_query(original_query: str, context_snippet: str) -> str:
     """
-    Build a hop-N+1 query that stays semantically anchored to the original question.
+    Build a reformulated query that stays semantically anchored to the
+    original question but targets whatever entity the current best passage
+    surfaced. Used both by retrieve_multi_hop()'s Phase 2 iterative hops and
+    by the SIMPLE-hard pipeline's "Retrieve Again" step.
 
-    Problem with entity-only reformulation: "Robert Downey Jr." as a hop-2 query
-    retrieves RDJ's biography page — not the passage that says who DIRECTED the
-    film starring RDJ.  The anchor (predicate/role/spatial) must come from the
-    ORIGINAL question, not from the retrieved passage.
+    Problem with entity-only reformulation: "Robert Downey Jr." as a follow-up
+    query retrieves RDJ's biography page — not the passage that says who
+    DIRECTED the film starring RDJ. The anchor (predicate/role/spatial) must
+    come from the ORIGINAL question, not from the retrieved passage.
 
     Priority order for anchor selection:
       1. Verbal predicate  (directed, wrote, founded, nationality, …)
@@ -607,7 +629,7 @@ def _reformulate_query(original_query: str, context_snippet: str) -> str:
       3. Spatial relation  (block away, next to, capital, headquarters, …)
       4. bare bridge entity (last resort — better than nothing)
 
-    Returns a natural-language hop-2 query of the form "BridgeEntity anchor".
+    Returns a natural-language follow-up query of the form "BridgeEntity anchor".
     """
     # ── Extract bridge entity from retrieved passage ──
     entities = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', context_snippet)
@@ -670,7 +692,6 @@ def _extract_entities(query: str) -> list:
         query, re.IGNORECASE,
     )
     if len(role_refs) >= 2:
-        # Return full descriptive phrases so retrieve_comparison queries for the right page
         return [f"{r[0]} of {r[1]}".strip() for r in role_refs[:2]]
 
     # Pass 2: raw named proper noun sequences
@@ -690,8 +711,8 @@ def _extract_entities(query: str) -> list:
 
 # ─────────────────────────────────────────────
 # STEP 3b: RETRIEVAL CONFIDENCE + COVERAGE
-# These run AFTER reranking, BEFORE generation,
-# to decide whether to expand the budget.
+# Run AFTER reranking, BEFORE generation, to decide whether a pipeline
+# tier's coverage-gated expansion step should fire.
 # ─────────────────────────────────────────────
 
 def estimate_retrieval_confidence(reranked_passages: list) -> float:
@@ -705,7 +726,7 @@ def estimate_retrieval_confidence(reranked_passages: list) -> float:
     We apply a scaled sigmoid so the output lives in [0, 1]:
       score  5  → confidence ≈ 0.92  (very confident)
       score  0  → confidence ≈ 0.50  (uncertain)
-      score -5  → confidence ≈ 0.08  (very low — expand budget)
+      score -5  → confidence ≈ 0.08  (very low — expand)
 
     Uses a weighted mean of the top-3 passages so a single good hit
     raises confidence even when the other passages are weak.
@@ -731,7 +752,10 @@ def check_evidence_coverage(query: str, retrieved_passages: list) -> dict:
     Strategy: extract proper-noun entities from the question and check whether each
     appears in the concatenated retrieved text.  Returns:
       coverage  — fraction of key entities present [0, 1]
-      missing   — entities not found (used to seed targeted follow-up queries)
+      missing   — entities not found (used to seed targeted follow-up queries —
+                  interpreted as "missing bridge entity" for MULTI_HOP pipelines,
+                  "missing comparison entity" for COMPARISON pipelines, and
+                  "missing fact" for SIMPLE pipelines)
       found     — entities that are present (diagnostic)
 
     Limitation: case-insensitive substring match; cannot verify the entity appears
@@ -758,17 +782,17 @@ def check_evidence_coverage(query: str, retrieved_passages: list) -> dict:
 
 
 # ─────────────────────────────────────────────
-# STEP 4: ADAPTIVE RAG PIPELINE (Stage 3)
+# LEGACY COMPATIBILITY LAYER — used only by Stage_4_Agentic_Loop.py
 # ─────────────────────────────────────────────
-RETRIEVAL_STRATEGY_LABEL = {
-    "SIMPLE":     "BM25 + dense hybrid (single-hop)",
-    "MULTI_HOP":  "Iterative multi-hop retrieval (3 hops)",
-    "COMPARISON": "Parallel per-entity retrieval",
-}
-
-
-# Retrieval parameters per (query_type, level) combination.
-# More difficult questions get more hops and larger top_k pools.
+# Stage_4_Agentic_Loop.py imports _BUDGET, _DEFAULT_BUDGET,
+# adaptive_retrieve_with_coverage_check, _retrieve_for_type, _RETRIEVAL_PARAMS,
+# and _DEFAULT_PARAMS directly and calls several of them with real control
+# flow (not just dead imports — confirmed by inspection). Stage 4 is
+# explicitly out of scope for this redesign ("Stage 4 will remain the only
+# fully agentic iterative retrieval stage"), so these are preserved verbatim,
+# unchanged from the pre-redesign implementation, purely for Stage 4's benefit.
+# Stage 3's own adaptive_rag_query() below does NOT use any of this — it uses
+# the new pipeline-planner system (_PIPELINES/_select_pipeline) instead.
 _RETRIEVAL_PARAMS = {
     #              top_k  max_hops
     ("SIMPLE",     "easy"):   (5,  1),
@@ -787,16 +811,6 @@ _DEFAULT_PARAMS = {
     "COMPARISON": (8,  1),
 }
 
-# ── Complexity-aware budget: top_k = retrieval pool, max_expansions = coverage loops ──
-# top_k here is the pool fed to the cross-encoder; the LLM always sees TOP_K passages.
-# Principle: HARD questions get 10× the retrieval pool of EASY, ensuring the evidence
-# for 2-hop bridge questions is present before generation even starts.
-# top_k is the candidate pool fed to the cross-encoder reranker.
-# All entries use top_k=50 to match Stage 1's RERANK_POOL=50 — this ensures
-# Stage 3 and 4 have at least as wide a retrieval net as Stage 1.
-# Complexity differentiation is expressed through max_hops and max_expansions,
-# NOT by shrinking the candidate pool (which would make Stage 3 find fewer
-# relevant passages than Stage 1 and produce worse answers on simple questions).
 _BUDGET = {
     ("SIMPLE",     "easy"):   {"top_k": 50, "max_hops": 1, "max_expansions": 0},
     ("SIMPLE",     "medium"): {"top_k": 50, "max_hops": 1, "max_expansions": 1},
@@ -820,11 +834,8 @@ def _retrieve_for_type(
     index, embedder, passages,
     top_k: int, max_hops: int,
 ) -> tuple:
-    """
-    Dispatch to the right retrieval function and return (pool, bridge_ctx).
-    bridge_ctx is a synthetic context string produced by multi-hop decomposition;
-    it is injected AFTER reranking so the cross-encoder scores real passages only.
-    """
+    """[LEGACY — Stage 4 only.] Dispatch to the right retrieval function and
+    return (pool, bridge_ctx)."""
     if query_type == "SIMPLE":
         return retrieve_simple(query, index, embedder, passages, top_k=top_k), None
 
@@ -832,11 +843,6 @@ def _retrieve_for_type(
         pool, bridge_ctx = decompose_and_retrieve_multi_hop(
             query, index, embedder, passages, top_k=top_k,
         )
-        # When max_hops > 2 AND decomposition actually succeeded (bridge_ctx is not None),
-        # also run iterative hops to broaden coverage of harder 2-hop chains.
-        # When bridge_ctx is None, decompose_and_retrieve_multi_hop() already fell back to
-        # retrieve_multi_hop() internally — calling it again doubles the entity-search
-        # pool size and amplifies any noise from non-anchor entity searches.
         if max_hops > 2 and bridge_ctx is not None:
             iter_pool = retrieve_multi_hop(
                 query, index, embedder, passages,
@@ -859,34 +865,13 @@ def adaptive_retrieve_with_coverage_check(
     budget: dict,
     verbose: bool = False,
 ) -> tuple:
-    """
-    Adaptive retrieval loop: retrieve → rerank → check confidence & coverage →
-    expand if insufficient → repeat up to budget['max_expansions'] times.
-
-    This implements the research proposal claim:
-    "More complex questions receive a more thorough retrieval process."
-
-    The loop triggers expansion when EITHER:
-      (a) retrieval confidence < RETRIEVAL_CONF_THRESHOLD
-          (cross-encoder says the returned passages are not relevant)
-      (b) evidence coverage < COVERAGE_THRESHOLD
-          (key question entities are missing from the returned passages)
-
-    When missing entities are identified, the expansion targets them directly
-    rather than blindly increasing top_k — focused expansion is more precise
-    and avoids retrieving unrelated noise.
-
-    Returns:
-      pool          — all passages retrieved across all expansions
-      reranked      — final TOP_K passages after cross-encoder reranking
-      bridge_ctx    — synthetic multi-hop bridge string (or None)
-      stats         — dict with confidence, coverage, expansions_used
-    """
+    """[LEGACY — Stage 4 only.] Pre-redesign adaptive retrieval loop: retrieve
+    → rerank → check confidence & coverage → expand if insufficient → repeat
+    up to budget['max_expansions'] times."""
     top_k          = budget["top_k"]
     max_hops       = budget["max_hops"]
     max_expansions = budget["max_expansions"]
 
-    # ── Initial retrieval ──
     pool, bridge_ctx = _retrieve_for_type(
         query, query_type, index, embedder, passages, top_k, max_hops,
     )
@@ -895,7 +880,6 @@ def adaptive_retrieve_with_coverage_check(
     cov_info   = check_evidence_coverage(query, reranked)
     expansions = 0
 
-    # ── Coverage expansion loop ──
     for _ in range(max_expansions):
         if (confidence >= RETRIEVAL_CONF_THRESHOLD
                 and cov_info["coverage"] >= COVERAGE_THRESHOLD):
@@ -909,7 +893,6 @@ def adaptive_retrieve_with_coverage_check(
         seen_titles = {p["title"] for p in pool}
 
         if cov_info["missing"]:
-            # Targeted retrieval for each missing entity
             for me in cov_info["missing"][:2]:
                 extra = retrieve_simple(
                     f"{me} {query}", index, embedder, passages,
@@ -920,7 +903,6 @@ def adaptive_retrieve_with_coverage_check(
                         pool.append(p)
                         seen_titles.add(p["title"])
         else:
-            # General budget expansion — double the pool
             extra_pool, _ = _retrieve_for_type(
                 query, query_type, index, embedder, passages,
                 min(top_k * 2, 50), max_hops,
@@ -943,301 +925,536 @@ def adaptive_retrieve_with_coverage_check(
     }
 
 
+# ─────────────────────────────────────────────
+# STEP 4: ADAPTIVE RETRIEVAL PLANNER — PIPELINE DEFINITIONS
+# ─────────────────────────────────────────────
+# Every pipeline function shares the signature:
+#   (query, index, embedder, passages, bm25) -> (pool, reranked, bridge_ctx, stats)
+# stats = {"coverage": float, "confidence": float, "expanded": bool}
+#
+# Difficulty controls WHICH STAGES RUN, not just numeric parameters:
+#   easy   pipelines never call check_evidence_coverage() at all
+#   medium pipelines check coverage and do ONE targeted expansion step
+#   hard   pipelines check coverage and do the full type-specific discovery
+#          mechanism (bridge decomposition / attribute-targeted comparison
+#          retrieval / targeted-expansion-plus-reformulated-retry)
+# ─────────────────────────────────────────────
+
+def _rerank_and_stats(query, pool):
+    """Shared post-retrieval step: rerank, then compute confidence + coverage
+    on the reranked result — reused by every pipeline tier."""
+    reranked   = rerank_passages(query, pool, top_k=TOP_K)
+    confidence = estimate_retrieval_confidence(reranked)
+    cov_info   = check_evidence_coverage(query, reranked)
+    return reranked, confidence, cov_info
+
+
+def _merge_pools(pool_a: list, pool_b: list) -> list:
+    """Title-deduplicated merge of two passage pools, preserving pool_a's order first."""
+    seen   = {p["title"] for p in pool_a}
+    merged = list(pool_a)
+    for p in pool_b:
+        if p["title"] not in seen:
+            merged.append(p)
+            seen.add(p["title"])
+    return merged
+
+
+def _targeted_expand(query, pool, missing_entities, index, embedder, passages, bm25,
+                      top_k=TOP_K_MULTI):
+    """
+    Generic targeted expansion, reused by SIMPLE and MULTI_HOP-medium pipelines:
+    re-query specifically for each missing entity rather than blindly widening
+    the pool, since a per-question corpus is already small and a targeted
+    re-query is more likely to change the reranked ordering than a blanket
+    re-run of the same query would.
+    """
+    if missing_entities:
+        for me in missing_entities[:2]:
+            extra = retrieve_simple(f"{me} {query}", index, embedder, passages,
+                                     top_k=top_k, bm25=bm25)
+            pool = _merge_pools(pool, extra)
+    else:
+        extra = retrieve_simple(query, index, embedder, passages,
+                                 top_k=top_k * 2, bm25=bm25)
+        pool = _merge_pools(pool, extra)
+    return pool
+
+
+def _expand_missing_comparison_entity(query, pool, missing_entities, index, embedder, passages):
+    """
+    COMPARISON-specific expansion: re-query specifically for whichever compared
+    entity's evidence is missing. Dense-only, matching retrieve_comparison()'s
+    own design rationale (BM25 over-weights generic attribute keywords instead
+    of finding the entity's bio page).
+    """
+    for me in missing_entities[:2]:
+        extra = _retrieve_dense(me, index, embedder, passages, TOP_K_MULTI)
+        pool  = _merge_pools(pool, extra)
+    return pool
+
+
+def _targeted_attribute_expand(query, pool, missing_entities, index, embedder, passages):
+    """
+    COMPARISON-hard only: re-query the missing entity together with the
+    specific comparison attribute this question is asking about (age,
+    nationality, awards, …), reusing retrieve_comparison()'s own attribute map
+    instead of duplicating it.
+    """
+    attribute_suffix = ""
+    for pattern, suffix in _COMPARISON_ATTRIBUTE_MAP.items():
+        if re.search(pattern, query, re.IGNORECASE):
+            attribute_suffix = suffix
+            break
+    if not attribute_suffix:
+        return pool
+    for me in missing_entities[:2]:
+        extra = _retrieve_dense(f"{me} {attribute_suffix}", index, embedder, passages, TOP_K_MULTI)
+        pool  = _merge_pools(pool, extra)
+    return pool
+
+
+def _needs_expansion(confidence: float, cov_info: dict) -> bool:
+    return confidence < RETRIEVAL_CONF_THRESHOLD or cov_info["coverage"] < COVERAGE_THRESHOLD
+
+
+# ── SIMPLE pipelines ──────────────────────────────────────────────────────
+def _pipeline_simple_easy(query, index, embedder, passages, bm25):
+    """Hybrid Retrieval → Cross Encoder → Generate. No coverage check at all."""
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": cov["coverage"],
+        "confidence": confidence, "expanded": False,
+    }
+
+
+def _pipeline_simple_medium(query, index, embedder, passages, bm25):
+    """Hybrid Retrieval → Coverage Check → Targeted Expansion → Cross Encoder → Generate."""
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    coverage_before = cov["coverage"]
+    expanded = False
+    if _needs_expansion(confidence, cov):
+        pool = _targeted_expand(query, pool, cov["missing"], index, embedder, passages, bm25)
+        reranked, confidence, cov = _rerank_and_stats(query, pool)
+        expanded = True
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": coverage_before,
+        "confidence": confidence, "expanded": expanded,
+    }
+
+
+def _pipeline_simple_hard(query, index, embedder, passages, bm25):
+    """Hybrid Retrieval → Coverage Check → Targeted Expansion → Retrieve Again → Merge → Cross Encoder → Generate.
+
+    "Retrieve Again" reformulates from the current best passage (reusing
+    _reformulate_query, the same mechanism retrieve_multi_hop's Phase 2 uses)
+    rather than re-running the identical query — the per-question corpus is
+    small and largely already covered by one hybrid pass, so a differently
+    worded query is what can actually change which passages rank highest,
+    not a second identical search.
+    """
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    coverage_before = cov["coverage"]
+    expanded = False
+    if _needs_expansion(confidence, cov):
+        pool = _targeted_expand(query, pool, cov["missing"], index, embedder, passages, bm25)
+        if pool:
+            reformulated = _reformulate_query(query, pool[0]["text"][:300])
+            if reformulated.strip().lower() != query.strip().lower():
+                extra = retrieve_simple(reformulated, index, embedder, passages,
+                                         top_k=RERANK_POOL, bm25=bm25)
+                pool = _merge_pools(pool, extra)
+        reranked, confidence, cov = _rerank_and_stats(query, pool)
+        expanded = True
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": coverage_before,
+        "confidence": confidence, "expanded": expanded,
+    }
+
+
+# ── MULTI_HOP (bridge) pipelines ──────────────────────────────────────────
+def _pipeline_bridge_easy(query, index, embedder, passages, bm25):
+    """Hybrid Retrieval → Cross Encoder → Generate. Deliberately NO bridge
+    decomposition — most HotpotQA bridge questions this easy are already
+    answerable from a single hybrid search, so paying for an extra LLM call
+    to decompose the question would be pure overhead."""
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": cov["coverage"],
+        "confidence": confidence, "expanded": False,
+    }
+
+
+def _pipeline_bridge_medium(query, index, embedder, passages, bm25):
+    """Hybrid Retrieval → Coverage Check → Bridge Entity Detection → Retrieve
+    Missing Bridge → Merge → Cross Encoder → Generate.
+
+    "Bridge Entity Detection" is a cheap, LLM-free pattern match
+    (_decompose_multihop_query) — if it finds a sub-question, we retrieve for
+    it directly. Unlike BRIDGE-hard, we do NOT call generate_answer() to
+    produce an intermediate bridge answer here — that extra LLM cost is
+    reserved for the hard tier only.
+    """
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    coverage_before = cov["coverage"]
+    expanded = False
+    if _needs_expansion(confidence, cov):
+        sq1, _sq2 = _decompose_multihop_query(query)
+        if sq1:
+            bridge_pool = retrieve_simple(sq1, index, embedder, passages, top_k=TOP_K_MULTI, bm25=bm25)
+            pool = _merge_pools(pool, bridge_pool)
+        else:
+            pool = _targeted_expand(query, pool, cov["missing"], index, embedder, passages, bm25)
+        reranked, confidence, cov = _rerank_and_stats(query, pool)
+        expanded = True
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": coverage_before,
+        "confidence": confidence, "expanded": expanded,
+    }
+
+
+def _pipeline_bridge_hard(query, index, embedder, passages, bm25):
+    """Hybrid Retrieval → Coverage Check → Bridge Entity Discovery →
+    Sub-question Generation → Retrieve Hop 1 → Retrieve Hop 2 → Merge →
+    Cross Encoder → Generate.
+
+    Reuses decompose_and_retrieve_multi_hop() in full — bridge entity
+    discovery + sub-question generation + hop 1 + hop 2 retrieval are exactly
+    what that function already does. If it can't parse a structural bridge
+    pattern, it internally falls back to retrieve_multi_hop() (entity-anchored
+    + iterative reformulation) as the alternate discovery mechanism — no new
+    code needed for that fallback.
+    """
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    coverage_before = cov["coverage"]
+    bridge_ctx = None
+    expanded = False
+    if _needs_expansion(confidence, cov):
+        decomposed_pool, bridge_ctx = decompose_and_retrieve_multi_hop(
+            query, index, embedder, passages, top_k=TOP_K_MULTI, bm25=bm25,
+        )
+        pool = _merge_pools(pool, decomposed_pool)
+        reranked, confidence, cov = _rerank_and_stats(query, pool)
+        expanded = True
+    return pool, reranked, bridge_ctx, {
+        "coverage": cov["coverage"], "coverage_before": coverage_before,
+        "confidence": confidence, "expanded": expanded,
+    }
+
+
+# ── COMPARISON pipelines ──────────────────────────────────────────────────
+def _pipeline_comparison_easy(query, index, embedder, passages, bm25):
+    """Retrieve Entity A / Retrieve Entity B → Merge → Cross Encoder → Generate.
+    retrieve_comparison() already does exactly this internally."""
+    pool = retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": cov["coverage"],
+        "confidence": confidence, "expanded": False,
+    }
+
+
+def _pipeline_comparison_medium(query, index, embedder, passages, bm25):
+    """Retrieve Entity A/B → Coverage Check → Expand Missing Entity → Merge →
+    Cross Encoder → Generate."""
+    pool = retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    coverage_before = cov["coverage"]
+    expanded = False
+    if _needs_expansion(confidence, cov):
+        pool = _expand_missing_comparison_entity(query, pool, cov["missing"], index, embedder, passages)
+        reranked, confidence, cov = _rerank_and_stats(query, pool)
+        expanded = True
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": coverage_before,
+        "confidence": confidence, "expanded": expanded,
+    }
+
+
+def _pipeline_comparison_hard(query, index, embedder, passages, bm25):
+    """Retrieve Entity A/B → Coverage Check → Targeted Attribute Retrieval →
+    Expand Missing Entity → Merge → Cross Encoder → Generate.
+
+    "Targeted Attribute Retrieval" is the one genuinely new piece of logic in
+    this redesign: re-query the under-covered entity together with the
+    specific attribute the question is asking about (age, nationality,
+    awards, …) instead of a generic re-query — reusing
+    retrieve_comparison()'s own attribute keyword map.
+    """
+    pool = retrieve_comparison(query, index, embedder, passages, top_k=TOP_K_MULTI)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    coverage_before = cov["coverage"]
+    expanded = False
+    if _needs_expansion(confidence, cov):
+        pool = _targeted_attribute_expand(query, pool, cov["missing"], index, embedder, passages)
+        pool = _expand_missing_comparison_entity(query, pool, cov["missing"], index, embedder, passages)
+        reranked, confidence, cov = _rerank_and_stats(query, pool)
+        expanded = True
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": coverage_before,
+        "confidence": confidence, "expanded": expanded,
+    }
+
+
+def _pipeline_wide_fallback(query, index, embedder, passages, bm25):
+    """Last-resort pipeline used only by the verifier-guided refinement retry
+    when the original answer already used the hardest tier for its type —
+    a wide plain hybrid re-query, matching the style of the old low-support
+    fallback."""
+    pool = retrieve_simple(query, index, embedder, passages, top_k=RERANK_POOL * 2, bm25=bm25)
+    reranked, confidence, cov = _rerank_and_stats(query, pool)
+    return pool, reranked, None, {
+        "coverage": cov["coverage"], "coverage_before": cov["coverage"],
+        "confidence": confidence, "expanded": True,
+    }
+
+
+_PIPELINES = {
+    ("SIMPLE",     "easy"):   _pipeline_simple_easy,
+    ("SIMPLE",     "medium"): _pipeline_simple_medium,
+    ("SIMPLE",     "hard"):   _pipeline_simple_hard,
+    ("MULTI_HOP",  "easy"):   _pipeline_bridge_easy,
+    ("MULTI_HOP",  "medium"): _pipeline_bridge_medium,
+    ("MULTI_HOP",  "hard"):   _pipeline_bridge_hard,
+    ("COMPARISON", "easy"):   _pipeline_comparison_easy,
+    ("COMPARISON", "medium"): _pipeline_comparison_medium,
+    ("COMPARISON", "hard"):   _pipeline_comparison_hard,
+}
+_DEFAULT_PIPELINE = {
+    "SIMPLE":     _pipeline_simple_medium,
+    "MULTI_HOP":  _pipeline_bridge_medium,
+    "COMPARISON": _pipeline_comparison_medium,
+}
+
+
+def _select_pipeline(query_type: str, level: str):
+    """The Adaptive Retrieval Planner: selects an entire retrieval pipeline
+    (a callable composing specific stages) based on (type, difficulty) —
+    not a set of parameters fed into one generic function."""
+    return _PIPELINES.get((query_type, level), _DEFAULT_PIPELINE.get(query_type, _pipeline_simple_medium))
+
+
+def _escalate_pipeline(query_type: str, level: str):
+    """Used only by the single verifier-guided refinement retry: escalate to
+    the hardest pipeline tier for this type, or a wide generic fallback if
+    already at the hardest tier."""
+    if level != "hard":
+        return _PIPELINES.get((query_type, "hard"), _DEFAULT_PIPELINE.get(query_type, _pipeline_simple_medium))
+    return _pipeline_wide_fallback
+
+
+def _pipeline_label(pipeline_fn) -> str:
+    return pipeline_fn.__name__.replace("_pipeline_", "").upper()
+
+
+def _verify_with_role_check(query, answer, reranked, query_type,
+                             verifier_model, verifier_tokenizer, verbose):
+    """
+    Runs Stage 2 verification, then for MULTI_HOP/COMPARISON demotes a
+    SUPPORTED status to PARTIAL if the LLM judge finds the answer's entity is
+    not in the correct semantic role (the NLI verifier checks entailment
+    against evidence but cannot verify the entity fills the right ROLE in a
+    multi-entity relationship).
+
+    Shared by both the initial verification and the one-time refinement
+    retry's verification, so a refined answer is held to exactly the same
+    scrutiny as the original — otherwise refinement could let a role-mismatch
+    hallucination through a check the original answer was subject to.
+    """
+    verification = verify(query, answer, reranked, verifier_model)
+
+    if verification["overall_status"] == "SUPPORTED" and query_type in ("MULTI_HOP", "COMPARISON"):
+        if not llm_judge_supported(query, answer, reranked, verbose):
+            verification = {
+                **verification,
+                "overall_status": "PARTIAL",
+                "overall_confidence": verification["support_score"],
+                "failure_reason": verification["failure_reason"] or "WRONG_ENTITY",
+                "recommended_action": "COMPARE" if query_type == "COMPARISON" else "REWRITE",
+            }
+            if verbose:
+                print("[LLM Judge] SUPPORTED → PARTIAL (entity not in correct role)")
+
+    return verification
+
+
 def adaptive_rag_query(query, index, embedder, passages,
                        verifier_model=None, verifier_tokenizer=None,
-                       verbose=True, query_type_override=None, level_override=None):
+                       verbose=True, query_type_override=None, level_override=None,
+                       bm25=None):
     """
-    Full Stage 3 pipeline with genuine complexity-aware adaptive retrieval:
+    Full Stage 3 pipeline — Adaptive Retrieval Planner.
 
-    Query
-      → classify_query()      (type: SIMPLE / MULTI_HOP / COMPARISON)
-      → estimate_complexity() (complexity: easy / medium / hard)
-      → _BUDGET lookup        (top_k, max_hops, max_expansions)
-      → adaptive_retrieve_with_coverage_check()
-          [retrieve → rerank → confidence/coverage check → expand if needed]
-      → generate_answer()
-      → refusal fallback
-      → verify (DistilBERT + LLM judge)
-      → low-support fallback
+      Question
+        → question analysis (type: SIMPLE/MULTI_HOP/COMPARISON, level: easy/medium/hard)
+          — HotpotQA ground truth (query_type_override/level_override) is used
+            whenever available; classify_query()/estimate_complexity() are only
+            a fallback for questions outside the loaded benchmark.
+        → planner selects ONE of nine named retrieval pipelines (type × level)
+        → retrieve → rerank → generate
+        → Stage 2 verify (+ LLM judge role-mismatch check for MULTI_HOP/COMPARISON)
+        → AT MOST ONE verifier-guided retrieval refinement if the answer was
+          refused, UNSUPPORTED, or low-confidence — escalate to a harder
+          pipeline, retrieve again, regenerate, re-verify, keep whichever is
+          better. Never chained further than this single retry — that boundary
+          is what keeps Stage 3 distinct from Stage 4's genuinely iterative
+          agentic loop.
 
-    The key difference from the prior version:
-      - Complexity is estimated INDEPENDENTLY of query type, then combined to
-        select a retrieval budget.  An EASY MULTI_HOP gets a small budget; a
-        HARD MULTI_HOP gets 5× the pool and 2 coverage expansions.
-      - Coverage is checked BEFORE generation — if key entities are missing,
-        the system retrieves specifically for them rather than generating blind.
-      - The fallback policy is unified: one path, one confidence comparison.
+    `bm25` is the per-question BM25Okapi instance build_example_corpus()
+    returned for this request; every retrieval path below threads it through
+    explicitly rather than falling back to any global BM25 state.
     """
     if verbose:
         print(f"\n{'='*60}")
         print(f"Query: {query}")
         print(f"{'='*60}")
 
-    # ── 1. Classify type ──
+    # ── 1. Question analysis: type ──
     if query_type_override == "bridge":
         query_type = "MULTI_HOP"
     elif query_type_override == "comparison":
         query_type = "COMPARISON"
+    elif query_type_override in ("SIMPLE", "MULTI_HOP", "COMPARISON"):
+        query_type = query_type_override
     else:
         query_type = classify_query(query)
 
-    # ── 2. Estimate complexity (use HotpotQA ground-truth when available) ──
-    complexity = level_override if level_override else estimate_complexity(query)
+    # ── 2. Question analysis: difficulty ──
+    level = level_override if level_override else estimate_complexity(query)
 
-    # ── 3. Look up budget ──
-    budget = _BUDGET.get((query_type, complexity), _DEFAULT_BUDGET[query_type])
+    # ── 3. Adaptive Retrieval Planner: select the pipeline ──
+    pipeline_fn = _select_pipeline(query_type, level)
 
     if verbose:
-        print(f"Type: {query_type} | Complexity: {complexity.upper()} | "
-              f"top_k={budget['top_k']}, max_hops={budget['max_hops']}, "
-              f"max_expansions={budget['max_expansions']}")
-        print(f"Strategy: {RETRIEVAL_STRATEGY_LABEL[query_type]}")
+        print(f"Type: {query_type} | Level: {level.upper()} | Pipeline: {_pipeline_label(pipeline_fn)}")
 
-    # ── 3b. Confidence-gated escalation for MULTI_HOP ──
-    # Principle: use the cheapest strategy that achieves sufficient retrieval
-    # confidence.  71.1% of HotpotQA "bridge" questions are structurally
-    # answerable with a single hybrid search — the dataset label means "evidence
-    # spans two articles", not "iterative reformulation is required".
-    #
-    # If SIMPLE retrieval is already confident (cross-encoder top-passage score
-    # above threshold), skip the full multi-hop expansion. Only escalate if the
-    # simple search is genuinely uncertain about the evidence.
-    #
-    # Threshold 0.65 (sigmoid of reranker score ≈3.0): conservative enough that
-    # questions genuinely requiring multi-hop evidence (long-range bridge) still
-    # escalate. Questions where the answer is in the first retrieved article
-    # (majority of bridge questions) return immediately.
-    _SIMPLE_SUFFICIENT = 0.65
-
-    # Track whether the escalation gate fired so the refusal fallback knows
-    # to escalate back to MULTI_HOP if SIMPLE produces no answer.
-    _gate_fired = False
-
-    # Skip escalation gate when ground-truth type is provided by the dataset.
-    # If HotpotQA says "bridge", always use MULTI_HOP — do not downgrade based
-    # on SIMPLE confidence. The gate only applies when the type was guessed by
-    # classify_query() (no override).
-    _type_from_dataset = query_type_override in ("bridge", "comparison",
-                                                  "MULTI_HOP", "COMPARISON", "SIMPLE")
-
-    if query_type == "MULTI_HOP" and not _type_from_dataset:
-        simple_budget = _BUDGET.get(("SIMPLE", complexity), _DEFAULT_BUDGET["SIMPLE"])
-        simple_pool   = retrieve_simple(query, index, embedder, passages,
-                                        top_k=simple_budget["top_k"])
-        simple_reranked  = rerank_passages(query, simple_pool, top_k=TOP_K)
-        simple_conf      = estimate_retrieval_confidence(simple_reranked)
-
-        if simple_conf >= _SIMPLE_SUFFICIENT:
-            # SIMPLE retrieval is sufficiently confident — no need for expensive
-            # multi-hop machinery. Use SIMPLE results and skip escalation.
-            if verbose:
-                print(f"[Escalation gate] SIMPLE conf={simple_conf:.3f} >= {_SIMPLE_SUFFICIENT} "
-                      f"-- skipping MULTI_HOP expansion")
-            _gate_fired  = True
-            query_type   = "SIMPLE"
-            budget       = simple_budget
-            pool, reranked, bridge_ctx, ret_stats = (
-                simple_pool, simple_reranked, None,
-                {"confidence": simple_conf, "coverage": 1.0,
-                 "missing_entities": [], "expansions_used": 0},
-            )
-        else:
-            if verbose:
-                print(f"[Escalation gate] SIMPLE conf={simple_conf:.3f} < {_SIMPLE_SUFFICIENT} "
-                      f"-- escalating to MULTI_HOP")
-            # ── 4. Adaptive retrieval with coverage check ──
-            pool, reranked, bridge_ctx, ret_stats = adaptive_retrieve_with_coverage_check(
-                query, query_type, index, embedder, passages, budget, verbose,
-            )
-    else:
-        # ── 4. Adaptive retrieval with coverage check ──
-        pool, reranked, bridge_ctx, ret_stats = adaptive_retrieve_with_coverage_check(
-            query, query_type, index, embedder, passages, budget, verbose,
-        )
+    # ── 4. Retrieve, rerank, coverage-check / expand (inside the pipeline) ──
+    pool, reranked, bridge_ctx, stats = pipeline_fn(query, index, embedder, passages, bm25)
 
     if verbose:
         print(f"\nRetrieved {len(pool)} → reranked to {len(reranked)} "
-              f"| conf={ret_stats['confidence']:.3f} "
-              f"cov={ret_stats['coverage']:.2f} "
-              f"expansions={ret_stats['expansions_used']}")
+              f"| conf={stats['confidence']:.3f} cov={stats['coverage']:.2f} "
+              f"expanded={stats['expanded']}")
         for i, p in enumerate(reranked[:5]):
-            hop_info = f" [hop {p.get('hop', '?')}]" if query_type == "MULTI_HOP" else ""
-            ent_info = f" [{p.get('entity', '')}]"    if query_type == "COMPARISON" else ""
-            print(f"  [{i+1}] {p['title']}{hop_info}{ent_info} "
-                  f"(rerank: {p.get('rerank_score', 0):.4f})")
+            print(f"  [{i+1}] {p['title']} (rerank: {p.get('rerank_score', 0):.4f})")
 
-    # ── 5. Build context and generate ──
-    # Bridge context is injected AFTER reranking so the cross-encoder scores
-    # only real Wikipedia passages; the LLM still receives the intermediate fact.
+    # ── 5. Generate ──
     context_passages = list(reranked)
     if bridge_ctx:
         context_passages = [{"title": "Bridge Finding", "text": bridge_ctx}] + context_passages
-
     answer = generate_answer(query, context_passages, query_type=query_type)
-
-    # ── 6. Refusal fallback ──
-    # Case A: escalation gate fired (SIMPLE used for a bridge question) but SIMPLE
-    # produced no answer. Cross-encoder confidence was a false positive — the top
-    # passage looked relevant but didn't contain the 2-hop answer chain.
-    # Rescue: run full MULTI_HOP now.
-    if _gate_fired and _is_refusal(answer):
-        if verbose:
-            print("[Fallback] Gate-SIMPLE refusal — escalating to full MULTI_HOP")
-        mh_budget = _BUDGET.get(("MULTI_HOP", complexity), _DEFAULT_BUDGET["MULTI_HOP"])
-        pool, reranked, bridge_ctx, _ = adaptive_retrieve_with_coverage_check(
-            query, "MULTI_HOP", index, embedder, passages, mh_budget, verbose,
-        )
-        context_passages = list(reranked)
-        if bridge_ctx:
-            context_passages = [{"title": "Bridge Finding", "text": bridge_ctx}] + context_passages
-        mh_answer = generate_answer(query, context_passages, query_type="MULTI_HOP")
-        if not _is_refusal(mh_answer):
-            answer       = mh_answer
-            query_type   = "MULTI_HOP"
-
-    # Case B: MULTI_HOP retrieval ran but produced a refusal — retry with simple.
-    if query_type == "MULTI_HOP" and _is_refusal(answer):
-        if verbose:
-            print("[Fallback] Refusal detected — retrying with simple retrieval")
-        fb_pool     = retrieve_simple(query, index, embedder, passages, top_k=TOP_K * 2)
-        fb_reranked = rerank_passages(query, fb_pool, top_k=TOP_K)
-        fb_answer   = generate_answer(query, fb_reranked, query_type="SIMPLE")
-        if not _is_refusal(fb_answer):
-            answer           = fb_answer
-            reranked         = fb_reranked
-            context_passages = fb_reranked
-            if verbose:
-                print(f"[Fallback] Simple-retrieval answer: {fb_answer}")
 
     if verbose:
         print(f"\nAnswer: {answer}")
 
-    # ── 7. Verify ──
-    verification = None
+    # ── 6. Verify ──
+    verification     = None
+    refinement_used   = False
     if verifier_model is not None and verifier_tokenizer is not None:
-        ctx          = build_verify_context(reranked, answer)
-        verification = verify(ctx, answer, verifier_model, verifier_tokenizer, question=query)
-
-        if (verification["label"] == "SUPPORTED"
-                and query_type in ("MULTI_HOP", "COMPARISON")):
-            if not llm_judge_supported(query, answer, reranked, verbose):
-                orig = verification["scores"]
-                verification = {
-                    **verification,
-                    "label":      "PARTIAL",
-                    "confidence": orig["SUPPORTED"],
-                    "scores": {
-                        "SUPPORTED":   orig["PARTIAL"],
-                        "PARTIAL":     orig["SUPPORTED"],
-                        "UNSUPPORTED": orig["UNSUPPORTED"],
-                    },
-                }
-                if verbose:
-                    print("[LLM Judge] SUPPORTED → PARTIAL (entity not in correct role)")
+        verification = _verify_with_role_check(
+            query, answer, reranked, query_type,
+            verifier_model, verifier_tokenizer, verbose,
+        )
 
         if verbose:
             icon = {"SUPPORTED": "✅", "PARTIAL": "⚠️", "UNSUPPORTED": "❌"}.get(
-                verification["label"], "?")
-            print(f"\nVerification: {icon} {verification['label']} "
-                  f"(confidence: {verification['confidence']:.4f})")
+                verification["overall_status"], "?")
+            print(f"\nVerification: {icon} {verification['overall_status']} "
+                  f"(confidence: {verification['overall_confidence']:.4f}, "
+                  f"reason: {verification.get('failure_reason')})")
 
-        # Low-support fallback: if multi-hop answer has very low support,
-        # try simple retrieval and use it if it gives ANY improvement.
-        # The condition previously required fb_verif["label"] == "SUPPORTED",
-        # which was too strict — "U.S. Route 60" correctly answers a highway
-        # question but the verifier gives PARTIAL (gold is "US 60"), so the
-        # old condition rejected a correct simple-retrieval answer.
-        if (query_type == "MULTI_HOP"
-                and verification["scores"].get("SUPPORTED", 1.0) < LOW_SUPPORT_THRESHOLD
-                and not _is_refusal(answer)):
+        # ── 7. At most ONE verifier-guided retrieval refinement ──
+        needs_refinement = (
+            _is_refusal(answer)
+            or verification["overall_status"] == "UNSUPPORTED"
+            or verification["support_score"] < LOW_SUPPORT_THRESHOLD
+        )
+
+        if needs_refinement:
             if verbose:
-                print(f"[Fallback] Low support "
-                      f"({verification['scores'].get('SUPPORTED', 0):.3f}) → simple retry")
-            fb_pool     = retrieve_simple(query, index, embedder, passages, top_k=TOP_K * 2)
-            fb_reranked = rerank_passages(query, fb_pool, top_k=TOP_K)
-            fb_answer   = generate_answer(query, fb_reranked, query_type="SIMPLE")
-            if not _is_refusal(fb_answer):
-                fb_ctx   = build_verify_context(fb_reranked, fb_answer)
-                fb_verif = verify(fb_ctx, fb_answer, verifier_model, verifier_tokenizer,
-                                  question=query)
-                fb_supp  = fb_verif["scores"].get("SUPPORTED", 0.0)
-                orig_supp = verification["scores"].get("SUPPORTED", 0.0)
-                fb_judge_ok = False
-                # LLM judge for SUPPORTED to catch role-mismatch hallucinations
-                if fb_verif["label"] == "SUPPORTED":
-                    fb_judge_ok = llm_judge_supported(query, fb_answer, fb_reranked, verbose)
-                    if not fb_judge_ok:
-                        fb_supp = 0.0
+                print(f"[Refinement] Escalating retrieval pipeline (one retry only)")
+            escalated_fn = _escalate_pipeline(query_type, level)
+            r_pool, r_reranked, r_bridge_ctx, r_stats = escalated_fn(query, index, embedder, passages, bm25)
 
-                use_fallback = (
-                    fb_supp > orig_supp and fb_verif["label"] in ("SUPPORTED", "PARTIAL")
-                ) or fb_judge_ok
+            r_context = list(r_reranked)
+            if r_bridge_ctx:
+                r_context = [{"title": "Bridge Finding", "text": r_bridge_ctx}] + r_context
+            r_answer = generate_answer(query, r_context, query_type=query_type)
 
-                # When both support scores are near-zero, DistilBERT calibration is
-                # unreliable for short factoid answers (e.g. "Billy Joel" vs "Ben Margulies"
-                # both get ~1% support despite one being correct). We're already in the
-                # "multi-hop failed" branch, so prefer the simple answer — multi-hop at
-                # near-zero almost always reflects a wrong bridge-entity confusion, not a
-                # correct but unverifiable answer.
-                if (not use_fallback
-                        and fb_verif["label"] in ("PARTIAL", "SUPPORTED")
-                        and fb_supp < 0.05 and orig_supp < 0.05):
-                    use_fallback = True
+            if not _is_refusal(r_answer):
+                r_verif  = _verify_with_role_check(
+                    query, r_answer, r_reranked, query_type,
+                    verifier_model, verifier_tokenizer, verbose,
+                )
+                r_supp    = r_verif["support_score"]
+                orig_supp = verification["support_score"]
+
+                improved = (
+                    r_supp > orig_supp
+                    or (verification["overall_status"] == "UNSUPPORTED" and r_verif["overall_status"] != "UNSUPPORTED")
+                )
+                if improved:
+                    answer          = r_answer
+                    pool            = r_pool
+                    reranked        = r_reranked
+                    verification    = r_verif
+                    stats           = r_stats
+                    pipeline_fn     = escalated_fn
+                    refinement_used = True
                     if verbose:
-                        print(f"[Fallback] Near-zero tie ({orig_supp:.3f} vs {fb_supp:.3f}) "
-                              f"— preferring simple answer over multi-hop bridge entity.")
-
-                if use_fallback:
-                    answer       = fb_answer
-                    reranked     = fb_reranked
-                    verification = fb_verif
-                    if verbose:
-                        print(f"[Fallback] Using simple answer: {fb_answer} "
-                              f"(supp: {fb_supp:.3f}, label: {fb_verif['label']})")
+                        print(f"[Refinement] Using refined answer: {r_answer} "
+                              f"(supp: {r_supp:.3f}, status: {r_verif['overall_status']})")
 
     return {
         "query":              query,
         "query_type":         query_type,
-        "complexity":         complexity,
-        "level":              complexity,                        # kept for Stage 4 compat
-        "retrieval_strategy": RETRIEVAL_STRATEGY_LABEL[query_type],
-        "retrieval_params":   budget,
-        "retrieval_stats":    ret_stats,
+        "complexity":         level,
+        "level":              level,                        # kept for Stage 4 compat
+        "retrieval_strategy": _pipeline_label(pipeline_fn),
+        "retrieval_params":   stats,
+        "retrieval_stats":    stats,
         "num_retrieved":      len(pool),
         "retrieved":          pool,
         "reranked":           reranked,
         "answer":             answer,
         "verification":       verification,
+        "refinement_used":    refinement_used,
     }
 
 
 # ─────────────────────────────────────────────
 # STEP 5: EVALUATION — Stage 3 vs Stage 1
 # ─────────────────────────────────────────────
-def evaluate_adaptive(index, embedder, passages,
-                      verifier_model, verifier_tokenizer,
-                      num_samples=100):
+def evaluate_adaptive(embedder, verifier_model, verifier_tokenizer, num_samples=100):
     """
-    Evaluates Stage 3 adaptive retrieval against Stage 1 baseline.
+    Evaluates Stage 3's adaptive retrieval planner against the Stage 1
+    baseline, under the official distractor protocol: EVERY validation
+    question builds its own temporary corpus via build_example_corpus(),
+    used identically by both the Stage 1 baseline and Stage 3 (so the
+    comparison is apples-to-apples on the exact same evidence pool), then
+    discarded before the next question.
+
+    Evaluates the REAL production pipeline — calls adaptive_rag_query()
+    directly rather than a lower-level helper, so these numbers reflect
+    exactly what Stage 5's /chat endpoint does. Uses HotpotQA's own
+    ground-truth type/level (never estimated) for every question, per the
+    project's evaluation methodology.
 
     Metrics:
-      Exact Match       — strict normalization
-      Token F1          — HotpotQA official token overlap
-      Hallucination Rate — (PARTIAL + UNSUPPORTED) / total
-      Recall@5/10/20    — gold supporting-fact titles in retrieval pool
-      Supporting-fact coverage — fraction of gold titles found in top-k
-      Avg retrieval confidence, coverage, expansions triggered
-      Per-level breakdown (easy / medium / hard) using HotpotQA ground truth
-
-    Stage 1 baseline uses the same hybrid+rerank pipeline (not bare dense-only)
-    so the comparison is apples-to-apples.
+      Exact Match, Token F1, Hallucination Rate (PARTIAL+UNSUPPORTED / total)
+      Recall@5/10/20 (gold supporting-fact titles in the retrieval pool)
+      Avg coverage / confidence / expansion + refinement rate
+      Per-level breakdown (easy / medium / hard)
     """
     from Stage_1_RAG_Pipeline import (
-        retrieve_hybrid as _s1_hybrid,
-        rerank_passages  as _s1_rerank,
+        build_example_corpus as _build_corpus,
         token_f1,
-        compute_recall_at_k,
-        RERANK_POOL,
     )
 
     print(f"\nEvaluating Stage 3 on {num_samples} HotpotQA validation samples...")
@@ -1249,12 +1466,11 @@ def evaluate_adaptive(index, embedder, passages,
     s1_f1_l, s3_f1_l       = [], []
     s1_hr_l, s3_hr_l       = [], []
     s3_r5_l, s3_r10_l, s3_r20_l = [], [], []
-    s3_cov_l, s3_conf_l, s3_exp_l = [], [], []
+    s3_cov_l, s3_conf_l, s3_refine_l = [], [], []
 
     by_level = defaultdict(lambda: defaultdict(list))
     results  = []
-
-    recall_pool_size = max(RERANK_POOL, 20)
+    skipped  = 0
 
     for i, example in enumerate(tqdm(dataset)):
         if i >= num_samples:
@@ -1263,69 +1479,58 @@ def evaluate_adaptive(index, embedder, passages,
         query       = example["question"]
         gold_answer = example["answer"]
         level       = example.get("level", "medium")
+        qtype       = example.get("type", "bridge")
         gold_titles = list(dict.fromkeys(example["supporting_facts"]["title"]))
 
-        # ── Stage 1 baseline (hybrid + rerank) ──
-        s1_pool     = _s1_hybrid(query, index, embedder, passages, top_k=recall_pool_size)
-        s1_reranked = _s1_rerank(query, s1_pool, top_k=TOP_K)
+        # ── Fresh per-question corpus, shared by both Stage 1 baseline and Stage 3 ──
+        ex_index, ex_passages, ex_bm25 = _build_corpus(example, embedder)
+        if ex_index is None:
+            skipped += 1
+            continue
+
+        recall_pool = min(max(RERANK_POOL, 20), len(ex_passages))
+
+        # ── Stage 1 baseline (hybrid + rerank), same corpus Stage 3 will use ──
+        s1_pool     = retrieve_hybrid(query, ex_index, embedder, ex_passages,
+                                       top_k=recall_pool, bm25=ex_bm25)
+        s1_reranked = rerank_passages(query, s1_pool, top_k=TOP_K)
         s1_answer   = generate_answer(query, s1_reranked)
         s1_em_v     = exact_match(s1_answer, gold_answer)
         s1_f1_v     = token_f1(s1_answer, gold_answer)
 
-        # ── Stage 3 adaptive retrieval (use ground-truth level as complexity) ──
-        query_type = classify_query(query)
-        budget     = _BUDGET.get((query_type, level), _DEFAULT_BUDGET[query_type])
-        # Use a pool large enough for Recall@20 measurement
-        budget_r   = dict(budget, top_k=max(budget["top_k"], recall_pool_size))
-
-        pool, reranked, bridge_ctx, ret_stats = adaptive_retrieve_with_coverage_check(
-            query, query_type, index, embedder, passages, budget_r, verbose=False,
+        # ── Stage 3 — real production pipeline, ground-truth type/level ──
+        s3_result = adaptive_rag_query(
+            query, ex_index, embedder, ex_passages,
+            verifier_model, verifier_tokenizer, verbose=False,
+            query_type_override=qtype, level_override=level,
+            bm25=ex_bm25,
         )
-
-        context_passages = list(reranked)
-        if bridge_ctx:
-            context_passages = [{"title": "Bridge Finding", "text": bridge_ctx}] + context_passages
-
-        s3_answer = generate_answer(query, context_passages, query_type=query_type)
-
-        # Refusal fallback
-        if query_type == "MULTI_HOP" and _is_refusal(s3_answer):
-            fb_pool     = retrieve_simple(query, index, embedder, passages, top_k=TOP_K * 2)
-            fb_reranked = rerank_passages(query, fb_pool, top_k=TOP_K)
-            fb_answer   = generate_answer(query, fb_reranked, query_type="SIMPLE")
-            if not _is_refusal(fb_answer):
-                s3_answer = fb_answer
-                reranked  = fb_reranked
-                pool      = fb_pool
-
-        s3_em_v = exact_match(s3_answer, gold_answer)
-        s3_f1_v = token_f1(s3_answer, gold_answer)
+        s3_answer  = s3_result["answer"]
+        s3_pool    = s3_result["retrieved"]
+        s3_em_v    = exact_match(s3_answer, gold_answer)
+        s3_f1_v    = token_f1(s3_answer, gold_answer)
 
         # ── Recall@K (pre-rerank pool) ──
-        pool_titles = [p["title"] for p in pool]
+        pool_titles = [p["title"] for p in s3_pool]
         r5  = compute_recall_at_k(pool_titles, gold_titles, 5)
         r10 = compute_recall_at_k(pool_titles, gold_titles, 10)
         r20 = compute_recall_at_k(pool_titles, gold_titles, 20)
 
         # ── Hallucination via verifier ──
-        s1_ctx   = build_verify_context(s1_reranked, s1_answer)
-        s1_verif = verify(s1_ctx, s1_answer, verifier_model, verifier_tokenizer, question=query)
-        s1_h     = 1 if s1_verif["label"] in ("PARTIAL", "UNSUPPORTED") else 0
+        s1_verif = verify(query, s1_answer, s1_reranked, verifier_model)
+        s1_h     = 1 if s1_verif["overall_status"] in ("PARTIAL", "UNSUPPORTED") else 0
 
-        s3_ctx   = build_verify_context(reranked, s3_answer)
-        s3_verif = verify(s3_ctx, s3_answer, verifier_model, verifier_tokenizer, question=query)
-        s3_h     = 1 if s3_verif["label"] in ("PARTIAL", "UNSUPPORTED") else 0
+        s3_verif = s3_result["verification"] or {"overall_status": "UNSUPPORTED"}
+        s3_h     = 1 if s3_verif["overall_status"] in ("PARTIAL", "UNSUPPORTED") else 0
 
-        # ── Accumulate global ──
         s1_em_l.append(s1_em_v);  s3_em_l.append(s3_em_v)
         s1_f1_l.append(s1_f1_v);  s3_f1_l.append(s3_f1_v)
         s1_hr_l.append(s1_h);     s3_hr_l.append(s3_h)
         s3_r5_l.append(r5);       s3_r10_l.append(r10);  s3_r20_l.append(r20)
-        s3_cov_l.append(ret_stats["coverage"])
-        s3_conf_l.append(ret_stats["confidence"])
-        s3_exp_l.append(ret_stats["expansions_used"])
+        s3_cov_l.append(s3_result["retrieval_stats"]["coverage"])
+        s3_conf_l.append(s3_result["retrieval_stats"]["confidence"])
+        s3_refine_l.append(1 if s3_result["refinement_used"] else 0)
 
-        # ── Accumulate per-level ──
         lv = by_level[level]
         lv["s1_em"].append(s1_em_v);  lv["s3_em"].append(s3_em_v)
         lv["s1_f1"].append(s1_f1_v);  lv["s3_f1"].append(s3_f1_v)
@@ -1336,7 +1541,8 @@ def evaluate_adaptive(index, embedder, passages,
             "question":     query,
             "gold":         gold_answer,
             "level":        level,
-            "query_type":   query_type,
+            "query_type":   s3_result["query_type"],
+            "pipeline":     s3_result["retrieval_strategy"],
             "s1_answer":    s1_answer,
             "s3_answer":    s3_answer,
             "s1_em":        s1_em_v,      "s3_em":   s3_em_v,
@@ -1344,15 +1550,14 @@ def evaluate_adaptive(index, embedder, passages,
             "s1_halluc":    s1_h,         "s3_halluc": s3_h,
             "recall_at_5":  round(r5, 4), "recall_at_10": round(r10, 4),
             "recall_at_20": round(r20, 4),
-            "coverage":     round(ret_stats["coverage"], 4),
-            "confidence":   round(ret_stats["confidence"], 4),
-            "expansions":   ret_stats["expansions_used"],
+            "coverage":     round(s3_result["retrieval_stats"]["coverage"], 4),
+            "confidence":   round(s3_result["retrieval_stats"]["confidence"], 4),
+            "refinement_used": s3_result["refinement_used"],
             "gold_titles":  gold_titles,
         })
 
-    # ── Summary table ──
     print(f"\n{'='*65}")
-    print(f"Stage Comparison ({num_samples} samples)")
+    print(f"Stage Comparison ({len(results)} samples{f', {skipped} skipped' if skipped else ''})")
     print(f"{'='*65}")
     print(f"  {'Metric':<30} {'Stage 1':>10} {'Stage 3':>10} {'Δ':>8}")
     print(f"  {'-'*58}")
@@ -1368,9 +1573,8 @@ def evaluate_adaptive(index, embedder, passages,
     print(f"  Retrieval Recall@20  : {_avg(s3_r20_l):.4f}")
     print(f"\n  Avg Coverage         : {_avg(s3_cov_l):.4f}")
     print(f"  Avg Confidence       : {_avg(s3_conf_l):.4f}")
-    print(f"  Avg Expansions       : {_avg(s3_exp_l):.2f}")
+    print(f"  Refinement Rate      : {_avg(s3_refine_l):.2%}")
 
-    # ── Per-level breakdown ──
     print(f"\n  {'─'*62}")
     print(f"  {'Level':<10} {'N':>4}  {'S1 EM':>7} {'S3 EM':>7} "
           f"{'S3 F1':>7} {'S3 HR':>7} {'R@10':>7}")
@@ -1385,17 +1589,16 @@ def evaluate_adaptive(index, embedder, passages,
               f"{_avg(lv['s3_f1']):>7.4f} {_avg(lv['s3_hr']):>7.4f} "
               f"{_avg(lv['r10']):>7.4f}")
 
-    # ── Query type breakdown ──
-    type_counts = Counter(r["query_type"] for r in results)
-    print(f"\n  Query type distribution:")
-    for qtype, cnt in type_counts.most_common():
-        qtype_em = [r["s3_em"] for r in results if r["query_type"] == qtype]
-        print(f"    {qtype:<12}: {cnt:>4} ({cnt/len(results)*100:.1f}%) "
-              f"| S3 EM={_avg(qtype_em):.3f}")
+    pipeline_counts = Counter(r["pipeline"] for r in results)
+    print(f"\n  Pipeline distribution:")
+    for pname, cnt in pipeline_counts.most_common():
+        p_em = [r["s3_em"] for r in results if r["pipeline"] == pname]
+        print(f"    {pname:<20}: {cnt:>4} ({cnt/len(results)*100:.1f}%) "
+              f"| S3 EM={_avg(p_em):.3f}")
 
     with open("stage3_results.json", "w") as f:
         json.dump({
-            "num_samples":    num_samples,
+            "num_samples":    len(results),
             "stage1_em":      _avg(s1_em_l),   "stage3_em":   _avg(s3_em_l),
             "stage1_f1":      _avg(s1_f1_l),   "stage3_f1":   _avg(s3_f1_l),
             "stage1_halluc":  _avg(s1_hr_l),   "stage3_halluc": _avg(s3_hr_l),
@@ -1403,8 +1606,8 @@ def evaluate_adaptive(index, embedder, passages,
             "recall_at_20":   _avg(s3_r20_l),
             "avg_coverage":   _avg(s3_cov_l),
             "avg_confidence": _avg(s3_conf_l),
-            "avg_expansions": _avg(s3_exp_l),
-            "query_types":    dict(type_counts),
+            "refinement_rate": _avg(s3_refine_l),
+            "pipelines":      dict(pipeline_counts),
             "results":        results,
         }, f, indent=2)
     print("\nResults saved → stage3_results.json")
@@ -1415,25 +1618,31 @@ def evaluate_adaptive(index, embedder, passages,
 # MAIN
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    print("Stage 3: Adaptive Retrieval")
+    from sentence_transformers import SentenceTransformer
+
+    print("Stage 3: Adaptive Retrieval Planner")
     print(f"Device: {DEVICE.upper()}\n")
 
-    # ── Load FAISS index ──
-    if os.path.exists(INDEX_PATH) and os.path.exists(PASSAGES_PATH):
-        index, embedder, passages = load_faiss_index()
-    else:
-        passages = load_hotpotqa_passages()
-        index, embedder, passages = build_faiss_index(passages)
+    # Official distractor protocol: no global FAISS/BM25 is ever built here.
+    # Each selected question gets its own ephemeral corpus from
+    # build_example_corpus(), exactly matching Stage 1's own demo pattern.
+    print(f"Loading embedding model: {EMBED_MODEL}")
+    embedder = SentenceTransformer(EMBED_MODEL)
 
-    # ── Load verifier ──
+    print("Loading HotpotQA train + validation splits (distractor)...")
+    train_dataset = load_dataset("hotpot_qa", "distractor", split="train")
+    val_dataset   = load_dataset("hotpot_qa", "distractor", split="validation")
+    combined_dataset = concatenate_datasets([train_dataset, val_dataset])
+    train_size = len(train_dataset)
+
     verifier_model, verifier_tokenizer = None, None
-    if os.path.exists(VERIFIER_PATH):
-        verifier_model, verifier_tokenizer = load_verifier(VERIFIER_PATH)
-        print("Verifier loaded — answers will be verified after generation.\n")
-    else:
-        print("No verifier found — run verifier_gpu.py --mode train first.\n")
+    if VERIFIER_PATH:
+        try:
+            verifier_model, verifier_tokenizer = load_verifier(VERIFIER_PATH)
+            print("Verifier loaded — answers will be verified after generation.\n")
+        except FileNotFoundError:
+            print("No verifier found — run Stage_2_Verifier_GPU.py --mode train first.\n")
 
-    # ── Test classifier on example queries ──
     print("Query Classifier Test:")
     print("-" * 40)
     test_queries = [
@@ -1446,22 +1655,40 @@ if __name__ == "__main__":
     for q in test_queries:
         print(f"  [{classify_query(q):>10}] {q}")
 
-    # ── Interactive demo ──
-    print("\n=== Stage 3: Adaptive RAG Demo ===")
-    print("Type 'eval' to run evaluation, 'quit' to exit.\n")
+    print(f"\n=== Stage 3: Adaptive Retrieval Demo ===")
+    print(f"{len(combined_dataset)} questions loaded "
+          f"({train_size} train + {len(val_dataset)} validation).")
+    print("Retrieval is scoped per-question — no global corpus is ever built.")
+    print(f"Enter an example index (0-{len(combined_dataset)-1}), "
+          f"'eval' to run batch evaluation, or 'quit' to exit.\n")
 
     while True:
-        query = input("Enter your question: ").strip()
-        if query.lower() == "quit":
+        cmd = input("Example index / 'eval' / 'quit': ").strip()
+        if cmd.lower() == "quit":
             break
-        elif query.lower() == "eval":
-            evaluate_adaptive(
-                index, embedder, passages,
-                verifier_model, verifier_tokenizer,
-                num_samples=50
-            )
-        elif query:
+        elif cmd.lower() == "eval":
+            evaluate_adaptive(embedder, verifier_model, verifier_tokenizer, num_samples=50)
+        elif cmd.isdigit():
+            idx = int(cmd)
+            if not (0 <= idx < len(combined_dataset)):
+                print(f"Index out of range (0-{len(combined_dataset)-1}).")
+                continue
+
+            origin_split = "train" if idx < train_size else "validation"
+            example = combined_dataset[idx]
+            print(f"\n[{origin_split}] Gold answer: {example['answer']}")
+
+            ex_index, ex_passages, ex_bm25 = build_example_corpus(example, embedder)
+            if ex_index is None:
+                print("This example has an empty context — skipping.")
+                continue
+
             adaptive_rag_query(
-                query, index, embedder, passages,
-                verifier_model, verifier_tokenizer
+                example["question"], ex_index, embedder, ex_passages,
+                verifier_model, verifier_tokenizer, verbose=True,
+                query_type_override=example.get("type"),
+                level_override=example.get("level"),
+                bm25=ex_bm25,
             )
+        else:
+            print("Enter an example index, 'eval', or 'quit'.")

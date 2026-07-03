@@ -1,26 +1,26 @@
 {
-  "timestamp": "2026-06-03T20:19:09.854072",
-  "git_commit": "95cb82d",
+  "timestamp": "2026-07-03T20:00:01.959766",
+  "git_commit": "191fe9a",
   "file_fingerprints": {
     "stage1": {
-      "mtime": "2026-05-31 13:00:40",
-      "md5": "25404e94"
+      "mtime": "2026-07-01 23:29:23",
+      "md5": "29889456"
     },
     "stage2": {
-      "mtime": "2026-05-30 12:23:03",
-      "md5": "dc2c975e"
+      "mtime": "2026-07-03 18:52:09",
+      "md5": "e8de73b1"
     },
     "stage3": {
-      "mtime": "2026-06-02 12:20:30",
-      "md5": "70f9479d"
+      "mtime": "2026-07-03 19:35:40",
+      "md5": "42d2b134"
     },
     "stage4": {
-      "mtime": "2026-06-02 12:56:49",
-      "md5": "30ae7a86"
+      "mtime": "2026-07-03 19:47:08",
+      "md5": "130bd95d"
     },
     "stage6": {
-      "mtime": "2026-05-28 14:22:25",
-      "md5": "265d36bf"
+      "mtime": "2026-07-03 19:38:26",
+      "md5": "703d0367"
     }
   },
   "config": {
@@ -29,67 +29,62 @@
     "ollama_model": "llama3.2",
     "top_k": 5,
     "max_hops": 3,
-    "max_iterations": 5,
+    "max_actions": 4,
     "conf_threshold": 0.5,
-    "features": {
-      "multi_hop_cot_prompt": true,
-      "simple_early_exit": true,
-      "stage3_reranking": true,
-      "alias_normalization": true
-    }
+    "architecture": "per-question temporary corpus (official distractor protocol)"
   },
-  "num_samples": 20,
-  "elapsed_min": 23.8,
+  "num_samples": 3,
+  "skipped": 0,
+  "elapsed_min": 2.2,
   "summary": {
     "stage1": {
-      "exact_match": 15.0,
-      "precision": 0.2218,
-      "recall": 0.5542,
-      "f1": 0.2601,
-      "macro_f1": null,
-      "hallucination_rate": 80.0,
+      "exact_match": 33.33,
+      "precision": 0.4167,
+      "recall": 0.6667,
+      "f1": 0.4667,
+      "hallucination_rate": 33.33,
       "abstention_rate": 0.0,
-      "n": 20,
+      "n": 3,
+      "macro_f1": null,
       "per_type_f1": {}
     },
     "stage2": {
-      "exact_match": 15.0,
-      "precision": 0.234,
-      "recall": 0.3208,
-      "f1": 0.2492,
-      "macro_f1": null,
-      "hallucination_rate": 50.0,
+      "exact_match": 33.33,
+      "precision": 0.4167,
+      "recall": 0.6667,
+      "f1": 0.4667,
+      "hallucination_rate": 33.33,
       "abstention_rate": 0.0,
-      "n": 20,
+      "n": 3,
+      "macro_f1": null,
       "per_type_f1": {}
     },
     "stage3": {
-      "exact_match": 35.0,
-      "precision": 0.4952,
-      "recall": 0.525,
-      "f1": 0.4752,
-      "macro_f1": 0.5299,
-      "hallucination_rate": 65.0,
+      "exact_match": 66.67,
+      "precision": 0.6667,
+      "recall": 0.6667,
+      "f1": 0.6667,
+      "hallucination_rate": 100.0,
       "abstention_rate": 0.0,
-      "n": 20,
+      "n": 3,
+      "macro_f1": 0.75,
       "per_type_f1": {
-        "COMPARISON": 0.6667,
-        "MULTI_HOP": 0.3932
+        "COMPARISON": 1.0,
+        "MULTI_HOP": 0.5
       }
     },
     "stage4": {
-      "exact_match": 15.0,
-      "precision": 0.2917,
-      "recall": 0.2625,
-      "f1": 0.2712,
-      "macro_f1": 0.2112,
-      "hallucination_rate": 20.0,
-      "abstention_rate": 20.0,
-      "n": 20,
+      "exact_match": 66.67,
+      "precision": 0.6667,
+      "recall": 0.6667,
+      "f1": 0.6667,
+      "hallucination_rate": 100.0,
+      "abstention_rate": 0.0,
+      "n": 3,
+      "macro_f1": 0.75,
       "per_type_f1": {
-        "COMPARISON": 0.3095,
-        "MULTI_HOP": 0.0,
-        "SIMPLE": 0.3242
+        "COMPARISON": 1.0,
+        "MULTI_HOP": 0.5
       }
     }
   },
@@ -104,478 +99,202 @@
         "recall": 1.0,
         "f1": 1.0,
         "abstained": false,
-        "hallucinated": true,
-        "query_type": null
+        "hallucinated": false,
+        "query_type": null,
+        "level": "hard",
+        "label": "SUPPORTED",
+        "scores": {
+          "SUPPORTED": 0.9458,
+          "PARTIAL": 0.0271,
+          "UNSUPPORTED": 0.0271
+        },
+        "latency": {
+          "pipeline": 8.6593,
+          "verify": 2.7292,
+          "total": 11.3885
+        },
+        "num_retrieved": 5,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       },
       {
         "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
         "gold": "Chief of Protocol",
-        "answer": "Shirley Temple played the role of Corliss Archer, but I couldn't find information on her holding a specific government position.",
+        "answer": "The woman who portrayed Corliss Archer in the film \"Kiss and Tell\" later became a radio actress, voicing characters such as Judy Jetson.",
         "em": 0,
-        "precision": 0.0526,
-        "recall": 0.3333,
-        "f1": 0.0909,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
         "abstained": false,
         "hallucinated": true,
-        "query_type": null
+        "query_type": null,
+        "level": "hard",
+        "label": "UNSUPPORTED",
+        "scores": {
+          "SUPPORTED": 0.1676,
+          "PARTIAL": 0.2081,
+          "UNSUPPORTED": 0.6243
+        },
+        "latency": {
+          "pipeline": 4.2393,
+          "verify": 3.5897,
+          "total": 7.829
+        },
+        "num_retrieved": 5,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       },
       {
         "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
         "gold": "Animorphs",
-        "answer": "The Animorphs series is a science fantasy young adult series told in first person, with companion books that explore the stories of enslaved worlds and alien species.",
+        "answer": "The Animorphs series by K. A.",
         "em": 0,
-        "precision": 0.0417,
+        "precision": 0.25,
         "recall": 1.0,
-        "f1": 0.08,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
-        "gold": "no",
-        "answer": "No",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "The director of the romantic comedy \"Big Stone Gap\" is based in what New York city?",
-        "gold": "Greenwich Village, New York City",
-        "answer": "The director of the romantic comedy \"Big Stone Gap\", Adriana Trigiani, was born and raised in New York City.",
-        "em": 0,
-        "precision": 0.125,
-        "recall": 0.5,
-        "f1": 0.2,
+        "f1": 0.4,
         "abstained": false,
         "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "2014 S/S is the debut album of a South Korean boy group that was formed by who?",
-        "gold": "YG Entertainment",
-        "answer": "S/S is the debut album of Got7, which was formed by JYP Entertainment.",
-        "em": 0,
-        "precision": 0.0769,
-        "recall": 0.5,
-        "f1": 0.1333,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?",
-        "gold": "Eenasul Fateh",
-        "answer": "I couldn't find any information on someone named Aladin who is known for helping organizations improve their performance as a consultant.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "The arena where the Lewiston Maineiacs played their home games can seat how many people?",
-        "gold": "3,677 seated",
-        "answer": "The Peter W. Stott Center in Portland, Oregon, has a seating capacity of 1,500.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Who is older, Annie Morton or Terry Richardson?",
-        "gold": "Terry Richardson",
-        "answer": "Terry Richardson was born on August 14, 1965, making him older than Annie Morton, who was born on October 8, 1970.",
-        "em": 0,
-        "precision": 0.0952,
-        "recall": 1.0,
-        "f1": 0.1739,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are Local H and For Against both from the United States?",
-        "gold": "yes",
-        "answer": "The key fact is that both bands mentioned in the question are indeed from the United States, with For Against being from Nebraska and Rise Against being from Illinois.\n\nFinal Answer: Yes. Both Local H and For Against are not mentioned in the provided context, but Rise Against is an American melodic hardcore band from Chicago, Illinois, and For Against is a United States post-punk/dream pop band from Lincoln, Nebraska.",
-        "em": 0,
-        "precision": 0.0156,
-        "recall": 1.0,
-        "f1": 0.0308,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
-        "gold": "Kansas Song",
-        "answer": "The University of Kansas's primary fight song is \"Rock Chalk Jayhawk.\"",
-        "em": 0,
-        "precision": 0.1818,
-        "recall": 1.0,
-        "f1": 0.3077,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "What screenwriter with credits for \"Evolution\" co-wrote a film starring Nicolas Cage and Téa Leoni?",
-        "gold": "David Weissman",
-        "answer": "Ivan Reitman co-wrote the screenplay for the 2001 film Evolution.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?",
-        "gold": "1999",
-        "answer": "The answer is not explicitly stated in the provided context. However, based on general knowledge, I can provide an answer.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
-        "gold": "no",
-        "answer": "Yes",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "The football manager who recruited David Beckham managed Manchester United during what timeframe?",
-        "gold": "from 1986 to 2013",
-        "answer": "Sir Alex Ferguson managed Manchester United from 1986 to 2013, which includes the time when he recruited David Beckham.",
-        "em": 0,
-        "precision": 0.2222,
-        "recall": 1.0,
-        "f1": 0.3636,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
-        "gold": "9,984",
-        "answer": "Brown State Fishing Lake is located in Kansas, which is part of the United States, and the US has a population of approximately 331 million inhabitants.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?",
-        "gold": "the North Atlantic Conference",
-        "answer": "The Vermont Catamounts men's soccer team currently competes in the America East Conference, which was previously known as the North Atlantic Conference from 1988 to 1996.",
-        "em": 0,
-        "precision": 0.125,
-        "recall": 1.0,
-        "f1": 0.2222,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are Giuseppe Verdi and Ambroise Thomas both Opera composers ?",
-        "gold": "yes",
-        "answer": "Yes",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Roger O. Egeberg was Assistant Secretary for Health and Scientific Affairs during the administration of a president that served during what years?",
-        "gold": "1969 until 1974",
-        "answer": "Roger O. Egeberg served as Assistant Secretary for Health and Scientific Affairs under President Ronald Reagan, who served from 1981 to 1989.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Which writer was from England, Henry Roth or Robert Erskine Childers?",
-        "gold": "Robert Erskine Childers DSC",
-        "answer": "Robert Erskine Childers was from England.",
-        "em": 0,
-        "precision": 0.5,
-        "recall": 0.75,
-        "f1": 0.6,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
+        "query_type": null,
+        "level": "hard",
+        "label": "SUPPORTED",
+        "scores": {
+          "SUPPORTED": 0.9975,
+          "PARTIAL": 0.0012,
+          "UNSUPPORTED": 0.0012
+        },
+        "latency": {
+          "pipeline": 6.1433,
+          "verify": 0.1755,
+          "total": 6.3189
+        },
+        "num_retrieved": 5,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       }
     ],
     "stage2": [
       {
         "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
         "gold": "yes",
-        "answer": "No",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
-        "gold": "Chief of Protocol",
-        "answer": "Rita Saffioti",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
-        "gold": "Animorphs",
-        "answer": "The science fantasy young adult series you are referring to is not specified in the provided text. However, based on the information given, I can suggest that the series might be \"Deryni Checkmate\" by Katherine Kurtz, which is a fantasy novel with elements of science fiction and has companion books narrating the stories of enslaved worlds and alien species.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
-        "gold": "no",
-        "answer": "No",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "The director of the romantic comedy \"Big Stone Gap\" is based in what New York city?",
-        "gold": "Greenwich Village, New York City",
-        "answer": "The final answer is not explicitly stated in the provided text. However, I can infer that the question is asking about the location of the director of the movie \"Big Stone Gap\".",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "2014 S/S is the debut album of a South Korean boy group that was formed by who?",
-        "gold": "YG Entertainment",
-        "answer": "FNC Entertainment.",
-        "em": 0,
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?",
-        "gold": "Eenasul Fateh",
-        "answer": "Samir Selmanovic.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "The arena where the Lewiston Maineiacs played their home games can seat how many people?",
-        "gold": "3,677 seated",
-        "answer": "The arena where the Lewiston Maineiacs played their home games is not specified, but it is mentioned that the QMJHL does not currently have teams located in the United States.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Who is older, Annie Morton or Terry Richardson?",
-        "gold": "Terry Richardson",
-        "answer": "Terry Richardson was born on August 14, 1965, while Annie Morton was born on October 8, 1970, making Terry Richardson approximately 5 years older than Annie Morton.",
-        "em": 0,
-        "precision": 0.0741,
-        "recall": 1.0,
-        "f1": 0.1379,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are Local H and For Against both from the United States?",
-        "gold": "yes",
         "answer": "Yes",
         "em": 1,
         "precision": 1.0,
         "recall": 1.0,
         "f1": 1.0,
         "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
-        "gold": "Kansas Song",
-        "answer": "The Alma Mater (Dartmouth College)",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
         "hallucinated": false,
-        "query_type": null
+        "query_type": null,
+        "level": "hard",
+        "label": "SUPPORTED",
+        "scores": {
+          "SUPPORTED": 0.9458,
+          "PARTIAL": 0.0271,
+          "UNSUPPORTED": 0.0271
+        },
+        "latency": {
+          "pipeline": 8.6593,
+          "verify": 2.7292,
+          "total": 11.3885
+        },
+        "num_retrieved": 5,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       },
       {
-        "question": "What screenwriter with credits for \"Evolution\" co-wrote a film starring Nicolas Cage and Téa Leoni?",
-        "gold": "David Weissman",
-        "answer": "Jane Campion.",
+        "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
+        "gold": "Chief of Protocol",
+        "answer": "The woman who portrayed Corliss Archer in the film \"Kiss and Tell\" later became a radio actress, voicing characters such as Judy Jetson.",
         "em": 0,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0,
         "abstained": false,
         "hallucinated": true,
-        "query_type": null
+        "query_type": null,
+        "level": "hard",
+        "label": "UNSUPPORTED",
+        "scores": {
+          "SUPPORTED": 0.1676,
+          "PARTIAL": 0.2081,
+          "UNSUPPORTED": 0.6243
+        },
+        "latency": {
+          "pipeline": 4.2393,
+          "verify": 3.5897,
+          "total": 7.829
+        },
+        "num_retrieved": 5,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       },
       {
-        "question": "What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?",
-        "gold": "1999",
-        "answer": "The final answer is 2014.",
+        "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
+        "gold": "Animorphs",
+        "answer": "The Animorphs series by K. A.",
         "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
-        "gold": "no",
-        "answer": "No",
-        "em": 1,
-        "precision": 1.0,
+        "precision": 0.25,
         "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "The football manager who recruited David Beckham managed Manchester United during what timeframe?",
-        "gold": "from 1986 to 2013",
-        "answer": "The football manager who recruited David Beckham managed Manchester United from 1995 to 2003, under the management of Sir Alex Ferguson.",
-        "em": 0,
-        "precision": 0.1053,
-        "recall": 0.5,
-        "f1": 0.1739,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
-        "gold": "9,984",
-        "answer": "Barr Lake State Park",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
+        "f1": 0.4,
         "abstained": false,
         "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?",
-        "gold": "the North Atlantic Conference",
-        "answer": "The Atlantic Collegiate Football Conference.",
-        "em": 0,
-        "precision": 0.5,
-        "recall": 0.6667,
-        "f1": 0.5714,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": null
-      },
-      {
-        "question": "Are Giuseppe Verdi and Ambroise Thomas both Opera composers ?",
-        "gold": "yes",
-        "answer": "No",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "Roger O. Egeberg was Assistant Secretary for Health and Scientific Affairs during the administration of a president that served during what years?",
-        "gold": "1969 until 1974",
-        "answer": "The final answer is not explicitly stated in the question, but based on the information provided earlier, I can infer that the president's term started after 2001.\n\nRoger O. Egeberg was Assistant Secretary for Health and Scientific Affairs under President George W.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
-      },
-      {
-        "question": "Which writer was from England, Henry Roth or Robert Erskine Childers?",
-        "gold": "Robert Erskine Childers DSC",
-        "answer": "Robert Erskine Childers was from England.",
-        "em": 0,
-        "precision": 0.5,
-        "recall": 0.75,
-        "f1": 0.6,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": null
+        "query_type": null,
+        "level": "hard",
+        "label": "SUPPORTED",
+        "scores": {
+          "SUPPORTED": 0.9975,
+          "PARTIAL": 0.0012,
+          "UNSUPPORTED": 0.0012
+        },
+        "latency": {
+          "pipeline": 6.1433,
+          "verify": 0.1755,
+          "total": 6.3189
+        },
+        "num_retrieved": 5,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       }
     ],
     "stage3": [
@@ -589,19 +308,59 @@
         "f1": 1.0,
         "abstained": false,
         "hallucinated": true,
-        "query_type": "COMPARISON"
+        "query_type": "COMPARISON",
+        "level": "hard",
+        "label": "PARTIAL",
+        "scores": {
+          "SUPPORTED": 0.9458,
+          "PARTIAL": 0.0407,
+          "UNSUPPORTED": 0.0136
+        },
+        "latency": {
+          "total": 10.1038
+        },
+        "num_retrieved": 15,
+        "pipeline": "COMPARISON_HARD",
+        "coverage": 0.5,
+        "coverage_before": 0.5,
+        "expanded": false,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       },
       {
         "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
         "gold": "Chief of Protocol",
-        "answer": "Minister for Police (Western Australia).",
+        "answer": "Meet Corliss Archer, a radio program, was broadcast by CBS and NBC in 1948-1956. Janet Waldo voiced the title character in \"Meet Corliss Archer\".",
         "em": 0,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0,
         "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
+        "hallucinated": true,
+        "query_type": "MULTI_HOP",
+        "level": "hard",
+        "label": "PARTIAL",
+        "scores": {
+          "SUPPORTED": 0.7621,
+          "PARTIAL": 0.1784,
+          "UNSUPPORTED": 0.0595
+        },
+        "latency": {
+          "total": 11.4731
+        },
+        "num_retrieved": 16,
+        "pipeline": "BRIDGE_HARD",
+        "coverage": 1.0,
+        "coverage_before": 1.0,
+        "expanded": false,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       },
       {
         "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
@@ -613,237 +372,100 @@
         "f1": 1.0,
         "abstained": false,
         "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
-        "gold": "no",
-        "answer": "No",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "The director of the romantic comedy \"Big Stone Gap\" is based in what New York city?",
-        "gold": "Greenwich Village, New York City",
-        "answer": "New York City.",
-        "em": 0,
-        "precision": 1.0,
-        "recall": 0.5,
-        "f1": 0.6667,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "2014 S/S is the debut album of a South Korean boy group that was formed by who?",
-        "gold": "YG Entertainment",
-        "answer": "SM Entertainment.",
-        "em": 0,
-        "precision": 0.5,
-        "recall": 0.5,
-        "f1": 0.5,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?",
-        "gold": "Eenasul Fateh",
-        "answer": "I couldn't find any information about someone known by their stage name Aladin helping organizations improve their performance as a consultant in the provided context.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "The arena where the Lewiston Maineiacs played their home games can seat how many people?",
-        "gold": "3,677 seated",
-        "answer": "6,925.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Who is older, Annie Morton or Terry Richardson?",
-        "gold": "Terry Richardson",
-        "answer": "Annie Morton (born 1970) is older than Terry Richardson (born 1965).",
-        "em": 0,
-        "precision": 0.1818,
-        "recall": 1.0,
-        "f1": 0.3077,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Are Local H and For Against both from the United States?",
-        "gold": "yes",
-        "answer": "No",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
-        "gold": "Kansas Song",
-        "answer": "University of Missouri–Kansas City School of Law.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "What screenwriter with credits for \"Evolution\" co-wrote a film starring Nicolas Cage and Téa Leoni?",
-        "gold": "David Weissman",
-        "answer": "David Diamond and David Weissman co-wrote \"The Family Man\".",
-        "em": 0,
-        "precision": 0.2222,
-        "recall": 1.0,
-        "f1": 0.3636,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?",
-        "gold": "1999",
-        "answer": "1999",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
-        "gold": "no",
-        "answer": "No",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "The football manager who recruited David Beckham managed Manchester United during what timeframe?",
-        "gold": "from 1986 to 2013",
-        "answer": "1986-2013.",
-        "em": 0,
-        "precision": 1.0,
-        "recall": 0.5,
-        "f1": 0.6667,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
-        "gold": "9,984",
-        "answer": "79.92 million.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?",
-        "gold": "the North Atlantic Conference",
-        "answer": "North Atlantic Conference.",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Are Giuseppe Verdi and Ambroise Thomas both Opera composers ?",
-        "gold": "yes",
-        "answer": "Yes",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "Roger O. Egeberg was Assistant Secretary for Health and Scientific Affairs during the administration of a president that served during what years?",
-        "gold": "1969 until 1974",
-        "answer": "1885-1897.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Which writer was from England, Henry Roth or Robert Erskine Childers?",
-        "gold": "Robert Erskine Childers DSC",
-        "answer": "Henry Roth",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "COMPARISON"
+        "query_type": "MULTI_HOP",
+        "level": "hard",
+        "label": "PARTIAL",
+        "scores": {
+          "SUPPORTED": 0.9537,
+          "PARTIAL": 0.0347,
+          "UNSUPPORTED": 0.0116
+        },
+        "latency": {
+          "total": 10.3579
+        },
+        "num_retrieved": 18,
+        "pipeline": "BRIDGE_HARD",
+        "coverage": 1.0,
+        "coverage_before": 1.0,
+        "expanded": false,
+        "status": null,
+        "iterations": null,
+        "actions_selected": null,
+        "recovered_via": null,
+        "error": null
       }
     ],
     "stage4": [
       {
         "question": "Were Scott Derrickson and Ed Wood of the same nationality?",
         "gold": "yes",
-        "answer": "I cannot confidently answer this question based on the available evidence.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": true,
-        "hallucinated": false,
-        "query_type": "COMPARISON"
+        "answer": "Yes",
+        "em": 1,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "abstained": false,
+        "hallucinated": true,
+        "query_type": "COMPARISON",
+        "level": "hard",
+        "label": "PARTIAL",
+        "scores": {
+          "SUPPORTED": 0.9458,
+          "PARTIAL": 0.0407,
+          "UNSUPPORTED": 0.0136
+        },
+        "latency": {
+          "total": 34.7529
+        },
+        "num_retrieved": null,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": "BEST_EFFORT",
+        "iterations": 3,
+        "actions_selected": [
+          "COMPARE",
+          "COMPARE",
+          "ABSTAIN"
+        ],
+        "recovered_via": null,
+        "error": null
       },
       {
         "question": "What government position was held by the woman who portrayed Corliss Archer in the film Kiss and Tell?",
         "gold": "Chief of Protocol",
-        "answer": "I cannot confidently answer this question based on the available evidence.",
+        "answer": "Meet Corliss Archer, a radio program, was broadcast by CBS and NBC in 1948-1956. Janet Waldo voiced the title character in \"Meet Corliss Archer\".",
         "em": 0,
         "precision": 0.0,
         "recall": 0.0,
         "f1": 0.0,
-        "abstained": true,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
+        "abstained": false,
+        "hallucinated": true,
+        "query_type": "MULTI_HOP",
+        "level": "hard",
+        "label": "PARTIAL",
+        "scores": {
+          "SUPPORTED": 0.7621,
+          "PARTIAL": 0.1784,
+          "UNSUPPORTED": 0.0595
+        },
+        "latency": {
+          "total": 19.9184
+        },
+        "num_retrieved": null,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": "BEST_EFFORT",
+        "iterations": 2,
+        "actions_selected": [
+          "COMPARE",
+          "ABSTAIN"
+        ],
+        "recovered_via": null,
+        "error": null
       },
       {
         "question": "What science fantasy young adult series, told in first person, has a set of companion books narrating the stories of enslaved worlds and alien species?",
@@ -854,213 +476,334 @@
         "recall": 1.0,
         "f1": 1.0,
         "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
-        "gold": "no",
-        "answer": "Yes",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
         "hallucinated": true,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "The director of the romantic comedy \"Big Stone Gap\" is based in what New York city?",
-        "gold": "Greenwich Village, New York City",
-        "answer": "New York City.",
-        "em": 0,
-        "precision": 1.0,
-        "recall": 0.5,
+        "query_type": "MULTI_HOP",
+        "level": "hard",
+        "label": "PARTIAL",
+        "scores": {
+          "SUPPORTED": 0.9537,
+          "PARTIAL": 0.0347,
+          "UNSUPPORTED": 0.0116
+        },
+        "latency": {
+          "total": 21.5141
+        },
+        "num_retrieved": null,
+        "pipeline": null,
+        "coverage": null,
+        "coverage_before": null,
+        "expanded": null,
+        "status": "BEST_EFFORT",
+        "iterations": 2,
+        "actions_selected": [
+          "COMPARE",
+          "ABSTAIN"
+        ],
+        "recovered_via": null,
+        "error": null
+      }
+    ]
+  },
+  "metrics": {
+    "stage1": {
+      "exact_match": 33.33,
+      "precision": 0.4167,
+      "recall": 0.6667,
+      "f1": 0.4667,
+      "hallucination_rate": 33.33,
+      "abstention_rate": 0.0,
+      "n": 3,
+      "macro_f1": null,
+      "per_type_f1": {}
+    },
+    "stage2": {
+      "exact_match": 33.33,
+      "precision": 0.4167,
+      "recall": 0.6667,
+      "f1": 0.4667,
+      "hallucination_rate": 33.33,
+      "abstention_rate": 0.0,
+      "n": 3,
+      "macro_f1": null,
+      "per_type_f1": {}
+    },
+    "stage3": {
+      "exact_match": 66.67,
+      "precision": 0.6667,
+      "recall": 0.6667,
+      "f1": 0.6667,
+      "hallucination_rate": 100.0,
+      "abstention_rate": 0.0,
+      "n": 3,
+      "macro_f1": 0.75,
+      "per_type_f1": {
+        "COMPARISON": 1.0,
+        "MULTI_HOP": 0.5
+      }
+    },
+    "stage4": {
+      "exact_match": 66.67,
+      "precision": 0.6667,
+      "recall": 0.6667,
+      "f1": 0.6667,
+      "hallucination_rate": 100.0,
+      "abstention_rate": 0.0,
+      "n": 3,
+      "macro_f1": 0.75,
+      "per_type_f1": {
+        "COMPARISON": 1.0,
+        "MULTI_HOP": 0.5
+      }
+    }
+  },
+  "stage_statistics": {
+    "stage1": {
+      "n": 3,
+      "avg_latency_sec": 8.512
+    },
+    "stage2": {
+      "n": 3,
+      "avg_latency_sec": 8.512
+    },
+    "stage3": {
+      "n": 3,
+      "avg_latency_sec": 10.645
+    },
+    "stage4": {
+      "n": 3,
+      "avg_latency_sec": 25.395
+    }
+  },
+  "difficulty_statistics": {
+    "stage1": {
+      "hard": {
+        "exact_match": 33.33,
+        "precision": 0.4167,
+        "recall": 0.6667,
+        "f1": 0.4667,
+        "hallucination_rate": 33.33,
+        "abstention_rate": 0.0,
+        "n": 3
+      }
+    },
+    "stage2": {
+      "hard": {
+        "exact_match": 33.33,
+        "precision": 0.4167,
+        "recall": 0.6667,
+        "f1": 0.4667,
+        "hallucination_rate": 33.33,
+        "abstention_rate": 0.0,
+        "n": 3
+      }
+    },
+    "stage3": {
+      "hard": {
+        "exact_match": 66.67,
+        "precision": 0.6667,
+        "recall": 0.6667,
         "f1": 0.6667,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "SIMPLE"
+        "hallucination_rate": 100.0,
+        "abstention_rate": 0.0,
+        "n": 3
+      }
+    },
+    "stage4": {
+      "hard": {
+        "exact_match": 66.67,
+        "precision": 0.6667,
+        "recall": 0.6667,
+        "f1": 0.6667,
+        "hallucination_rate": 100.0,
+        "abstention_rate": 0.0,
+        "n": 3
+      }
+    }
+  },
+  "query_type_statistics": {
+    "stage1": {},
+    "stage2": {},
+    "stage3": {
+      "COMPARISON": {
+        "exact_match": 100.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "hallucination_rate": 100.0,
+        "abstention_rate": 0.0,
+        "n": 1
       },
-      {
-        "question": "2014 S/S is the debut album of a South Korean boy group that was formed by who?",
-        "gold": "YG Entertainment",
-        "answer": "JYP Entertainment",
-        "em": 0,
+      "MULTI_HOP": {
+        "exact_match": 50.0,
         "precision": 0.5,
         "recall": 0.5,
         "f1": 0.5,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Who was known by his stage name Aladin and helped organizations improve their performance as a consultant?",
-        "gold": "Eenasul Fateh",
-        "answer": "I cannot confidently answer this question based on the available evidence.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": true,
-        "hallucinated": false,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "The arena where the Lewiston Maineiacs played their home games can seat how many people?",
-        "gold": "3,677 seated",
-        "answer": "2,000.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Who is older, Annie Morton or Terry Richardson?",
-        "gold": "Terry Richardson",
-        "answer": "I cannot confidently answer this question based on the available evidence.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": true,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Are Local H and For Against both from the United States?",
-        "gold": "yes",
-        "answer": "No",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
-        "gold": "Kansas Song",
-        "answer": "Cougar Fight Song",
-        "em": 0,
-        "precision": 0.3333,
-        "recall": 0.5,
-        "f1": 0.4,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "What screenwriter with credits for \"Evolution\" co-wrote a film starring Nicolas Cage and Téa Leoni?",
-        "gold": "David Weissman",
-        "answer": "Jane Anderson.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "What year did Guns N Roses perform a promo for a movie starring Arnold Schwarzenegger as a former New York Police detective?",
-        "gold": "1999",
-        "answer": "1989",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Are Random House Tower and 888 7th Avenue both used for real estate?",
-        "gold": "no",
-        "answer": "Yes",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "The football manager who recruited David Beckham managed Manchester United during what timeframe?",
-        "gold": "from 1986 to 2013",
-        "answer": "1990s",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
-        "gold": "9,984",
-        "answer": "36,531",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "The Vermont Catamounts men's soccer team currently competes in a conference that was formerly known as what from 1988 to 1996?",
-        "gold": "the North Atlantic Conference",
-        "answer": "North Atlantic Conference",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "SIMPLE"
-      },
-      {
-        "question": "Are Giuseppe Verdi and Ambroise Thomas both Opera composers ?",
-        "gold": "yes",
-        "answer": "Yes",
-        "em": 1,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "COMPARISON"
-      },
-      {
-        "question": "Roger O. Egeberg was Assistant Secretary for Health and Scientific Affairs during the administration of a president that served during what years?",
-        "gold": "1969 until 1974",
-        "answer": "1981-1982.",
-        "em": 0,
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "abstained": false,
-        "hallucinated": true,
-        "query_type": "MULTI_HOP"
-      },
-      {
-        "question": "Which writer was from England, Henry Roth or Robert Erskine Childers?",
-        "gold": "Robert Erskine Childers DSC",
-        "answer": "Robert Erskine Childers",
-        "em": 0,
-        "precision": 1.0,
-        "recall": 0.75,
-        "f1": 0.8571,
-        "abstained": false,
-        "hallucinated": false,
-        "query_type": "COMPARISON"
+        "hallucination_rate": 100.0,
+        "abstention_rate": 0.0,
+        "n": 2
       }
-    ]
+    },
+    "stage4": {
+      "COMPARISON": {
+        "exact_match": 100.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "hallucination_rate": 100.0,
+        "abstention_rate": 0.0,
+        "n": 1
+      },
+      "MULTI_HOP": {
+        "exact_match": 50.0,
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "hallucination_rate": 100.0,
+        "abstention_rate": 0.0,
+        "n": 2
+      }
+    }
+  },
+  "latency": {
+    "stage1": {
+      "avg_total_sec": 8.512,
+      "n": 3,
+      "avg_pipeline_sec": 6.347,
+      "avg_verify_sec": 2.165
+    },
+    "stage2": {
+      "avg_total_sec": 8.512,
+      "n": 3,
+      "avg_pipeline_sec": 6.347,
+      "avg_verify_sec": 2.165
+    },
+    "stage3": {
+      "avg_total_sec": 10.645,
+      "n": 3
+    },
+    "stage4": {
+      "avg_total_sec": 25.395,
+      "n": 3
+    }
+  },
+  "confusion_matrices": {
+    "stage1": {
+      "SUPPORTED": {
+        "em_correct": 1,
+        "em_incorrect": 1
+      },
+      "PARTIAL": {
+        "em_correct": 0,
+        "em_incorrect": 0
+      },
+      "UNSUPPORTED": {
+        "em_correct": 0,
+        "em_incorrect": 1
+      }
+    },
+    "stage2": {
+      "SUPPORTED": {
+        "em_correct": 1,
+        "em_incorrect": 1
+      },
+      "PARTIAL": {
+        "em_correct": 0,
+        "em_incorrect": 0
+      },
+      "UNSUPPORTED": {
+        "em_correct": 0,
+        "em_incorrect": 1
+      }
+    },
+    "stage3": {
+      "SUPPORTED": {
+        "em_correct": 0,
+        "em_incorrect": 0
+      },
+      "PARTIAL": {
+        "em_correct": 2,
+        "em_incorrect": 1
+      },
+      "UNSUPPORTED": {
+        "em_correct": 0,
+        "em_incorrect": 0
+      }
+    },
+    "stage4": {
+      "SUPPORTED": {
+        "em_correct": 0,
+        "em_incorrect": 0
+      },
+      "PARTIAL": {
+        "em_correct": 2,
+        "em_incorrect": 1
+      },
+      "UNSUPPORTED": {
+        "em_correct": 0,
+        "em_incorrect": 0
+      }
+    }
+  },
+  "roc_auc": {
+    "stage1": 0.5,
+    "stage2": 0.5,
+    "stage3": 1.0,
+    "stage4": 1.0
+  },
+  "pr_auc": {
+    "stage1": 0.5,
+    "stage2": 0.5,
+    "stage3": 1.0,
+    "stage4": 1.0
+  },
+  "stage_improvements": {
+    "stage2_vs_stage1": {
+      "delta_em": 0.0,
+      "delta_f1": 0.0,
+      "delta_hallucination": 0.0
+    },
+    "stage3_vs_stage2": {
+      "delta_em": 33.34,
+      "delta_f1": 0.2,
+      "delta_hallucination": 66.67
+    },
+    "stage4_vs_stage3": {
+      "delta_em": 0.0,
+      "delta_f1": 0.0,
+      "delta_hallucination": 0.0
+    }
+  },
+  "agent_statistics": {
+    "avg_iterations": 2.33,
+    "avg_actions_per_question": 2.33,
+    "action_counts": {
+      "COMPARE": 4,
+      "ABSTAIN": 3
+    },
+    "action_distribution_pct": {
+      "COMPARE": 57.1,
+      "ABSTAIN": 42.9
+    },
+    "status_counts": {
+      "BEST_EFFORT": 3
+    },
+    "recovered_via_counts": {},
+    "recovery_rate_pct": 0.0,
+    "n": 3
+  },
+  "retrieval_statistics": {
+    "pipeline_usage": {
+      "COMPARISON_HARD": 1,
+      "BRIDGE_HARD": 2
+    },
+    "pipeline_usage_pct": {
+      "COMPARISON_HARD": 33.3,
+      "BRIDGE_HARD": 66.7
+    },
+    "avg_coverage_before_expansion": 0.8333,
+    "avg_coverage_after_expansion": 0.8333,
+    "avg_num_retrieved": 16.33,
+    "expansion_rate_pct": 0.0,
+    "n": 3
   }
 }

@@ -70,7 +70,6 @@ from Stage_1_RAG_Pipeline import (
     EMBED_MODEL,
     OLLAMA_MODEL,
 )
-from Stage_2_Build_Verifier_Dataset import load_processed_ids
 
 logger = logging.getLogger("stage2_label_generator")
 
@@ -106,6 +105,33 @@ def setup_logging(verbose: bool = False) -> None:
     logger.setLevel(level)
     logger.addHandler(handler)
     logger.propagate = False
+
+
+def _record_key(record: Dict[str, Any]) -> str:
+    """Unique key for one labelable unit. The multi-candidate dataset writes
+    several rows per question_id, so resume tracking must be per-candidate
+    (via `candidate_id`) — falling back to `question_id` alone only for the
+    older single-candidate dataset format, where that's already unique."""
+    return record.get("candidate_id") or record["question_id"]
+
+
+def load_labeled_keys(output_path: str) -> Set[str]:
+    """Scans an existing labeled-output JSONL file and returns the set of
+    candidate keys already labeled, so a re-run resumes without re-labeling
+    or silently skipping a question's other, not-yet-labeled candidates."""
+    keys: Set[str] = set()
+    if not os.path.exists(output_path):
+        return keys
+    with open(output_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                keys.add(_record_key(json.loads(line)))
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return keys
 
 
 # ─────────────────────────────────────────────
@@ -334,11 +360,18 @@ def decompose_claims(processed_answer: str, gold_answer: str) -> Tuple[str, List
 # ─────────────────────────────────────────────
 def label_record(record: Dict[str, Any], embedder: SentenceTransformer) -> Dict[str, Any]:
     """Runs the full Decision 1/2/3 cascade on one dataset record and returns
-    the record augmented with `label`, `label_metadata`, and `split`."""
+    the record augmented with `label`, `label_metadata`, and `split`.
+
+    Works against the multi-candidate schema (`candidate_answer` / `context`)
+    produced by the current Stage_2_Build_Verifier_Dataset.py, falling back
+    to the older single-candidate field names (`processed_answer` /
+    `reranked_passages`) so any pre-existing dataset file in that format can
+    still be labeled without a separate code path.
+    """
     question = record["question"]
     gold_answer = record["gold_answer"]
-    processed_answer = record["processed_answer"]
-    reranked_passages = record["reranked_passages"]
+    processed_answer = record.get("candidate_answer", record.get("processed_answer"))
+    reranked_passages = record.get("context", record.get("reranked_passages"))
     supporting_titles = {sf["title"] for sf in record["supporting_facts"]}
 
     core_claim, extra_claims, decomp_tier, decomp_signal = decompose_claims(processed_answer, gold_answer)
@@ -400,15 +433,16 @@ def export_audit_sample(labeled_path: str, csv_path: str, sample_size: int, seed
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "question_id", "question", "gold_answer", "processed_answer",
+            "question_id", "source", "question", "gold_answer", "candidate_answer",
             "label", "core_correct", "core_correct_signal",
             "core_grounded", "core_grounded_signal", "num_extra_claims",
             "human_verdict_agrees",  # left blank for manual annotation
         ])
         for r in sample:
             md = r["label_metadata"]
+            candidate_answer = r.get("candidate_answer", r.get("processed_answer"))
             writer.writerow([
-                r["question_id"], r["question"], r["gold_answer"], r["processed_answer"],
+                r["question_id"], r.get("source", "stage1"), r["question"], r["gold_answer"], candidate_answer,
                 r["label"], md["core_correct"], md["core_correct_signal"],
                 md["core_grounded"], md["core_grounded_signal"], len(md["extra_claims"]),
                 "",
@@ -437,9 +471,9 @@ def main() -> None:
         logger.error(f"Input file not found: {args.input}")
         return
 
-    processed_ids = load_processed_ids(args.output)
-    if processed_ids:
-        logger.info(f"Resuming: {len(processed_ids)} records already labeled in {args.output}")
+    processed_keys = load_labeled_keys(args.output)
+    if processed_keys:
+        logger.info(f"Resuming: {len(processed_keys)} records already labeled in {args.output}")
 
     logger.info(f"Loading embedding model: {EMBED_MODEL}")
     embedder = SentenceTransformer(EMBED_MODEL)
@@ -451,15 +485,16 @@ def main() -> None:
     label_counts: Counter = Counter()
     tier_counts: Counter = Counter()
     llm_fallback_count = 0
-    done = len(processed_ids)
+    done = len(processed_keys)
 
     pbar = tqdm(total=len(input_records), initial=done, desc="Labeling")
     try:
         with open(args.output, "a", encoding="utf-8") as out_f:
             for record in input_records:
-                qid = record["question_id"]
-                if qid in processed_ids:
+                key = _record_key(record)
+                if key in processed_keys:
                     continue
+                qid = record["question_id"]
                 try:
                     labeled = label_record(record, embedder)
                 except Exception:
