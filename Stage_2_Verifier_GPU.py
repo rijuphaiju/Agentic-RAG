@@ -539,11 +539,52 @@ _EVASIVE_PATTERNS = re.compile(
 )
 
 
+_CLAUSE_BOUNDARY_RE = re.compile(
+    r',\s+(?:and|but|while|with|also|as well as)\b|\s+(?:and|but|while)\s+',
+    re.IGNORECASE,
+)
+
+
+def _truncate_at_clause_boundary(text: str, max_words: int) -> str:
+    """Shortens `text` to at most `max_words`, preferring to cut at the last
+    clause boundary (comma+conjunction, or a bare conjunction) within that
+    budget rather than a strict word-count cut.
+
+    A hard word-count cut risks leaving a dangling, incomplete trailing
+    phrase — e.g. truncating "...for Women, with its publication beginning
+    in 1844." at 12 words produces "...with its publication beginning",
+    a fragment with no evaluable content. Verification code (both the
+    verifier itself and the Stage 2 label-generation cascade) can misread
+    such a fragment as a separate "extra claim" that fails a groundedness
+    check purely because it's incomplete, not because it's a fabricated
+    fact — manufacturing a spurious PARTIAL/UNSUPPORTED signal. Cutting at
+    the nearest complete clause boundary instead avoids this.
+
+    Falls back to the plain word-count cut when no clause boundary exists
+    within the budget (a single long clause with no natural break) — this
+    is a best-effort improvement, not a guarantee for every input.
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text.strip()
+
+    fallback = " ".join(words[:max_words])
+    boundaries = [m.start() for m in _CLAUSE_BOUNDARY_RE.finditer(text)]
+    valid_boundaries = [b for b in boundaries if len(text[:b].split()) <= max_words]
+    if valid_boundaries:
+        clause = text[:max(valid_boundaries)].strip().rstrip(",")
+        if clause:
+            return clause
+    return fallback
+
+
 def _distill_for_verify(answer: str, max_words: int = 12) -> str:
     """Shorten a verbose LLM answer to a compact phrase before verification.
 
-    Normal case: distill to first 12 words so the verifier sees a short phrase
-    matching its training distribution (gold answers are 1-5 words).
+    Normal case: distill to a clause-boundary-aware ~12-word phrase so the
+    verifier sees a short phrase matching its training distribution (gold
+    answers are 1-5 words), without leaving a dangling incomplete fragment
+    behind (see _truncate_at_clause_boundary).
 
     Evasive/hedging case: when the LLM says "not specified", "cannot determine",
     "likely based elsewhere" etc., the first 12 words are often a grounded
@@ -566,13 +607,11 @@ def _distill_for_verify(answer: str, max_words: int = 12) -> str:
         # Find the sentence containing the evasive pattern and return it
         for sent in sentences:
             if _EVASIVE_PATTERNS.search(sent):
-                words = sent.split()
-                return ' '.join(words[:max_words]) if len(words) > max_words else sent.strip()
+                return _truncate_at_clause_boundary(sent.strip(), max_words)
 
-    # Normal case: take first sentence, cap at max_words
+    # Normal case: take first sentence, cap at max_words (clause-boundary-aware)
     first = re.split(r'(?<=[.!?])\s', answer.strip(), maxsplit=1)[0]
-    words = first.split()
-    return ' '.join(words[:max_words]) if len(words) > max_words else first.strip()
+    return _truncate_at_clause_boundary(first, max_words)
 
 
 def verify(context, answer, model, tokenizer, question=None):

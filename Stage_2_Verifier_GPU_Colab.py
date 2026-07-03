@@ -3,11 +3,14 @@ Stage 2: Faithfulness Verifier — Colab/CUDA Edition
 =====================================================
 Project: HARA — Hallucination-Aware Retrieval Agent
 
-Paste this entire file into a Colab cell or upload as Stage_2_Verifier_GPU.py.
-Set runtime to T4 GPU before running.
+Trains on real Stage 1 outputs, automatically labeled by
+Stage_2_Build_Verifier_Dataset.py + Stage_2_Label_Generator.py (run locally
+first) — not synthetic templates. Upload both this script and the resulting
+verifier_dataset_labeled.jsonl to Colab. Set runtime to T4 GPU before running.
 
 Run:
-    !python Stage_2_Verifier_GPU.py --mode train
+    !python Stage_2_Verifier_GPU_Colab.py --mode train --data-path verifier_dataset_labeled.jsonl
+    !python Stage_2_Verifier_GPU_Colab.py --mode eval  --data-path verifier_dataset_labeled.jsonl
 
 After training completes, download verifier_model.pt:
     from google.colab import files
@@ -15,19 +18,17 @@ After training completes, download verifier_model.pt:
 """
 
 # ── Install dependencies (run this cell first in Colab) ──────────────────────
-# !pip install -q transformers datasets faiss-cpu sentence-transformers tqdm
+# !pip install -q transformers tqdm
 
 import argparse
 import json
 import os
-import pickle
-import random
 import re
+from collections import Counter
 
 import numpy as np
 import torch
 import torch.nn as nn
-from datasets import load_dataset
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -43,9 +44,11 @@ NUM_CLASSES         = 3
 BATCH_SIZE          = 64     # T4 16GB: safe at 64; increase to 96 if memory allows
 EPOCHS              = 8
 LR                  = 2e-5   # standard DistilBERT fine-tuning LR
-TRAIN_SAMPLES       = 15000  # 15000 × ~13 examples = ~195k total
 VERIFIER_PATH       = "verifier_model.pt"
-DATA_PATH           = "verifier_data_bert.pkl"
+# JSONL produced by Stage_2_Build_Verifier_Dataset.py + Stage_2_Label_Generator.py
+# (real Stage 1 outputs, automatically labeled) — replaces the old synthetic
+# verifier_data_bert.pkl cache. Upload this file alongside this script in Colab.
+LABELED_DATA_PATH   = "verifier_dataset_labeled.jsonl"
 LABEL_SMOOTHING     = 0.05
 EARLY_STOP_PATIENCE = 3
 DROPOUT             = 0.2
@@ -62,162 +65,40 @@ print(f"[Device] {DEVICE.upper()}"
 # STEP 1: BUILD TRAINING DATA
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_other_entity(question: str, gold: str) -> str | None:
-    """Extract the comparison counterpart entity from a HotpotQA comparison question.
+_LABEL_TO_ID = {"SUPPORTED": 0, "PARTIAL": 1, "UNSUPPORTED": 2}
 
-    Example: question = "Which band was founded first, Hole or The Wolfhounds?"
-             gold     = "The Wolfhounds"
-             returns  -> "Hole"
 
-    Used to generate UNSUPPORTED counterexamples for comparison questions so the
-    verifier learns the reasoning boundary, not just surface lexical overlap.
+def load_jsonl_dataset(path: str, split: str) -> list[dict]:
+    """Loads labeled verifier training data from a JSONL file produced by
+    Stage_2_Build_Verifier_Dataset.py + Stage_2_Label_Generator.py — real
+    Stage 1 RAG outputs with automatically assigned SUPPORTED/PARTIAL/
+    UNSUPPORTED labels, replacing the old synthetic template generator.
+
+    Filters to the requested pre-assigned `split` ("train"/"val"/"test").
+    That field was set once, deterministically, by question_id in
+    Stage_2_Label_Generator.py — it is NOT re-split here, and must not be,
+    to avoid any risk of leakage between buckets.
+
+    Converts each record into the same {"context": str, "answer": str,
+    "label": int} shape VerifierDataset already expects, so VerifierDataset
+    itself needs no changes. The context string is built via
+    build_verify_context() — the exact same function verify() calls at
+    inference — so training and inference context construction are
+    guaranteed identical, not just similar.
     """
-    gold_lower = gold.lower()
-    skip = {
-        'which', 'who', 'were', 'was', 'what', 'when', 'where', 'how', 'did',
-        'the', 'both', 'and', 'or', 'of', 'a', 'an', 'is', 'are', 'be',
-    }
-    candidates = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b', question)
-    for c in candidates:
-        if c.lower() in skip:
-            continue
-        if len(c) <= 2:
-            continue
-        if c.lower() in gold_lower or gold_lower in c.lower():
-            continue
-        return c
-    return None
-
-
-def build_training_data(num_samples=TRAIN_SAMPLES):
-    """Build verifier training data from HotpotQA training split.
-
-    Label definitions:
-    ------------------
-    SUPPORTED   — context contains sufficient evidence to conclude the answer is
-                  correct. Includes verbatim matches AND logically inferred
-                  conclusions (comparison results, multi-hop chains).
-
-    PARTIAL     — answer is partially grounded: context is incomplete (distractor
-                  passages) OR answer makes extra claims beyond what context supports.
-
-    UNSUPPORTED — answer contradicts context or has no grounding in it. Includes
-                  the wrong comparison entity asserted confidently.
-
-    Input format: "Q: {question} A: {answer}" vs context
-    -----------------------------------------------------
-    The question enables the verifier to understand what is being claimed, not
-    just whether a string appears in context. This is critical for comparison
-    questions: "The Wolfhounds were founded first" requires knowing what the
-    question asks to validate it from two dates in context.
-    """
-    print("Loading HotpotQA training split...")
-    dataset     = load_dataset("hotpot_qa", "distractor", split="train")
-    examples    = list(dataset)
-    all_answers = [ex["answer"] for ex in examples]
-
     data = []
-    print(f"Building verifier training data from {num_samples} examples...")
-
-    for ex in tqdm(examples[:num_samples]):
-        gold      = ex["answer"]
-        question  = ex["question"]
-        qtype     = ex.get("type", "bridge")    # "bridge" or "comparison"
-        titles    = ex["context"]["title"]
-        sentences = ex["context"]["sentences"]
-        sf_titles = set(ex["supporting_facts"]["title"])
-
-        supporting, distractor = [], []
-        for title, sents in zip(titles, sentences):
-            block = " ".join(sents)
-            (supporting if title in sf_titles else distractor).append(block)
-
-        sup_ctx  = " ".join(supporting)[:800]
-        dist_ctx = " ".join(distractor)[:800] if distractor else sup_ctx
-
-        def qa(ans: str) -> str:
-            return f"Q: {question} A: {ans}"
-
-        # ── SUPPORTED ──────────────────────────────────────────────────────────
-        # 1. Verbatim gold answer
-        data.append({"context": sup_ctx, "answer": qa(gold), "label": 0})
-
-        # 2. Sentence-form paraphrases of the gold answer.
-        #    The LLM generates sentence forms ("The answer is X", "It is X",
-        #    "Final Answer: X"). The old training data WRONGLY labelled these as
-        #    PARTIAL against supporting context, teaching the verifier that
-        #    "sentence form = PARTIAL". This is the root cause of PARTIAL bias.
-        for p in [
-            f"The answer is {gold}.",
-            f"It is {gold}.",
-            f"Final Answer: {gold}",
-        ]:
-            data.append({"context": sup_ctx, "answer": qa(p), "label": 0})
-
-        if len(gold.split()) <= 4:
-            data.append({"context": sup_ctx, "answer": qa(f"{gold} is the answer."), "label": 0})
-            data.append({"context": sup_ctx, "answer": qa(f"That would be {gold}."), "label": 0})
-
-        # 3. Comparison-specific SUPPORTED: inferred conclusions.
-        #    "The Wolfhounds were founded first" is SUPPORTED when context shows
-        #    Wolfhounds formed in 1985 and Hole formed in 1989.
-        if qtype == "comparison" and gold[:1].isupper() and len(gold.split()) <= 4:
-            for tmpl in [
-                f"{gold} was founded first.",
-                f"{gold} was formed earlier.",
-                f"{gold} is older.",
-                f"{gold} won more.",
-                f"{gold} has more.",
-                f"{gold} came first.",
-                f"{gold} is the answer because the evidence supports it.",
-            ]:
-                data.append({"context": sup_ctx, "answer": qa(tmpl), "label": 0})
-
-        # ── UNSUPPORTED ────────────────────────────────────────────────────────
-        # 1. Random wrong answer (verbatim and sentence form)
-        wrong = random.choice(all_answers)
-        while wrong.lower() == gold.lower():
-            wrong = random.choice(all_answers)
-        data.append({"context": sup_ctx, "answer": qa(wrong), "label": 2})
-        data.append({"context": sup_ctx, "answer": qa(f"The answer is {wrong}."), "label": 2})
-
-        # 2. Comparison-specific UNSUPPORTED: wrong entity asserted confidently.
-        #    "Hole was founded first" is UNSUPPORTED when Wolfhounds' date is earlier.
-        #    This teaches the verifier the comparison reasoning boundary.
-        if qtype == "comparison":
-            other = _get_other_entity(question, gold)
-            if other:
-                for tmpl in [
-                    other,
-                    f"The answer is {other}.",
-                    f"{other} was founded first.",
-                    f"{other} was formed earlier.",
-                    f"{other} won more.",
-                ]:
-                    data.append({"context": sup_ctx, "answer": qa(tmpl), "label": 2})
-
-        # ── PARTIAL ────────────────────────────────────────────────────────────
-        # 1. Correct answer but incomplete/distractor context
-        data.append({"context": dist_ctx, "answer": qa(gold), "label": 1})
-        data.append({"context": dist_ctx, "answer": qa(f"The answer is {gold}."), "label": 1})
-
-        # 2. Truncated answer (first word of multi-word gold)
-        partial_ans = gold.split()[0]
-        if partial_ans.lower() != gold.lower():
-            data.append({"context": sup_ctx, "answer": qa(partial_ans), "label": 1})
-
-        # 3. Correct answer + extra unverifiable claim (most common PARTIAL at inference)
-        extra = random.choice(all_answers)
-        while extra.lower() == gold.lower():
-            extra = random.choice(all_answers)
-        data.append({"context": sup_ctx, "answer": qa(f"{gold} and also {extra}."), "label": 1})
-
-    random.shuffle(data)
-    counts = {0: 0, 1: 0, 2: 0}
-    for d in data:
-        counts[d["label"]] += 1
-    print(f"Dataset built: {len(data)} examples")
-    print(f"  SUPPORTED={counts[0]} | PARTIAL={counts[1]} | UNSUPPORTED={counts[2]}")
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if record.get("split") != split:
+                continue
+            context = build_verify_context(record["reranked_passages"], record["processed_answer"])
+            answer = f"Q: {record['question']} A: {record['processed_answer']}"
+            data.append({"context": context, "answer": answer, "label": _LABEL_TO_ID[record["label"]]})
+    print(f"Loaded {len(data)} '{split}' examples from {path}")
     return data
 
 
@@ -353,9 +234,13 @@ def run_epoch(model, loader, criterion, optimizer=None, scheduler=None,
 
 
 def train(model, train_loader, val_loader):
-    # Class weights: PARTIAL highest — hardest class and most consequential
-    # (false UNSUPPORTED on a correct PARTIAL causes unnecessary abstention)
-    weights   = torch.tensor([1.0, 1.8, 1.4]).to(DEVICE)
+    # Class weights computed dynamically from the REAL observed label
+    # distribution in train_loader (real Stage 1 outputs, not a fixed
+    # hand-tuned guess like the old [1.0, 1.8, 1.4] used for synthetic data).
+    # Standard inverse-frequency ("balanced") weighting: weight_c = N / (C * count_c).
+    label_counts  = torch.bincount(train_loader.dataset.labels, minlength=NUM_CLASSES).float()
+    weights       = (label_counts.sum() / (NUM_CLASSES * label_counts.clamp(min=1))).to(DEVICE)
+    print(f"Class counts (train): {label_counts.tolist()} -> weights: {weights.tolist()}")
     criterion = nn.CrossEntropyLoss(weight=weights, label_smoothing=LABEL_SMOOTHING)
 
     # Differential LR: BERT body lower, classifier head higher
@@ -552,62 +437,97 @@ def verify_batch(contexts, answers, model, tokenizer, batch_size=32):
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 7: EVALUATE
 # ─────────────────────────────────────────────────────────────────────────────
-def evaluate_on_hotpotqa(model, tokenizer, num_samples=500):
-    print(f"\nEvaluating verifier on {num_samples} HotpotQA validation examples...")
-    dataset     = load_dataset("hotpot_qa", "distractor", split="validation")
-    examples    = list(dataset)
-    all_answers = [ex["answer"] for ex in examples]
+def evaluate_on_labeled_split(model, tokenizer, data_path: str = LABELED_DATA_PATH, split: str = "val"):
+    """Evaluates the trained verifier against REAL held-out Stage 1 outputs —
+    the `split` bucket (default "val") inside the labeled JSONL — replacing
+    the old synthetic template-based self-evaluation entirely.
 
-    eval_data = []
-    for ex in examples[:num_samples // 3]:
-        gold      = ex["answer"]
-        question  = ex["question"]
-        titles    = ex["context"]["title"]
-        sentences = ex["context"]["sentences"]
-        sf_titles = set(ex["supporting_facts"]["title"])
+    Reports two distinct kinds of statistics, kept clearly separated:
+      - Model performance against the automatically-assigned ground truth:
+        accuracy, per-class precision/recall/F1, Macro F1, confusion matrix.
+      - Label *provenance* recorded in label_metadata by
+        Stage_2_Label_Generator.py: label distribution, tier-usage
+        statistics, and the percentage of examples that required the LLM
+        fallback — these describe how the ground truth was derived, not how
+        well the model predicted it.
+    """
+    records = []
+    with open(data_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and json.loads(line).get("split") == split:
+                records.append(json.loads(line))
 
-        supporting, distractor = [], []
-        for title, sents in zip(titles, sentences):
-            block = " ".join(sents)
-            (supporting if title in sf_titles else distractor).append(block)
+    if not records:
+        print(f"No '{split}' records found in {data_path}")
+        return None
 
-        sup_ctx  = " ".join(supporting)[:800]
-        dist_ctx = " ".join(distractor)[:800] if distractor else sup_ctx
-        wrong    = random.choice(all_answers)
+    contexts = [build_verify_context(r["reranked_passages"], r["processed_answer"]) for r in records]
+    answers  = [f"Q: {r['question']} A: {r['processed_answer']}" for r in records]
+    labels   = [_LABEL_TO_ID[r["label"]] for r in records]
 
-        def qa(ans):
-            return f"Q: {question} A: {ans}"
+    results = verify_batch(contexts, answers, model, tokenizer, batch_size=BATCH_SIZE)
+    preds   = [_LABEL_TO_ID[r["label"]] for r in results]
 
-        eval_data.append({"context": sup_ctx,  "answer": qa(gold),  "label": 0})
-        eval_data.append({"context": sup_ctx,  "answer": qa(wrong), "label": 2})
-        eval_data.append({"context": dist_ctx, "answer": qa(gold),  "label": 1})
-
-    contexts = [d["context"] for d in eval_data]
-    answers  = [d["answer"]  for d in eval_data]
-    labels   = [d["label"]   for d in eval_data]
-
-    results  = verify_batch(contexts, answers, model, tokenizer, batch_size=BATCH_SIZE)
-    preds    = [list(LABEL_MAP.values()).index(r["label"]) for r in results]
-
+    # ── Model performance ──────────────────────────────────────────────
     per_f1, macro_f1 = compute_macro_f1(labels, preds)
     acc = sum(p == l for p, l in zip(preds, labels)) / len(labels)
 
-    print(f"\n{'='*60}")
-    print(f"Verifier Evaluation — {len(eval_data)} samples")
-    print(f"{'='*60}")
-    print(f"Accuracy  : {acc:.4f} ({acc*100:.1f}%)")
-    print(f"Macro F1  : {macro_f1:.4f}  (target ≥ 0.70)")
-    print(f"  SUPPORTED   F1: {per_f1[0]:.4f}")
-    print(f"  PARTIAL     F1: {per_f1[1]:.4f}")
-    print(f"  UNSUPPORTED F1: {per_f1[2]:.4f}")
+    confusion = [[0] * NUM_CLASSES for _ in range(NUM_CLASSES)]
+    for p, l in zip(preds, labels):
+        confusion[l][p] += 1
 
+    precisions, recalls = [], []
+    for c in range(NUM_CLASSES):
+        tp = sum(1 for p, l in zip(preds, labels) if p == c and l == c)
+        fp = sum(1 for p, l in zip(preds, labels) if p == c and l != c)
+        fn = sum(1 for p, l in zip(preds, labels) if p != c and l == c)
+        precisions.append(tp / (tp + fp + 1e-8))
+        recalls.append(tp / (tp + fn + 1e-8))
+
+    # ── Label provenance (about the ground truth, not the model) ──────
+    label_dist = Counter(r["label"] for r in records)
+    tier_dist: Counter = Counter()
+    llm_fallback = 0
+    for r in records:
+        md = r["label_metadata"]
+        tier_dist[f"correct_tier_{md['core_correct_tier']}"] += 1
+        tier_dist[f"grounded_tier_{md['core_grounded_tier']}"] += 1
+        if md["core_correct_tier"] == 4 or md["core_grounded_tier"] == 3:
+            llm_fallback += 1
+
+    print(f"\n{'='*60}")
+    print(f"Verifier Evaluation — real held-out '{split}' split ({len(records)} examples)")
+    print(f"{'='*60}")
+    print(f"Accuracy : {acc:.4f} ({acc*100:.1f}%)")
+    print(f"Macro F1 : {macro_f1:.4f}")
+    for c in range(NUM_CLASSES):
+        print(f"  {LABEL_MAP[c]:12s} P={precisions[c]:.4f}  R={recalls[c]:.4f}  F1={per_f1[c]:.4f}")
+    print(f"\nConfusion matrix (rows=true, cols=pred), order {[LABEL_MAP[c] for c in range(NUM_CLASSES)]}:")
+    for c in range(NUM_CLASSES):
+        print(f"  {LABEL_MAP[c]:12s} {confusion[c]}")
+    print(f"\nLabel distribution (ground truth): {dict(label_dist)}")
+    print(f"Tier usage (label provenance):      {dict(tier_dist)}")
+    print(f"LLM-fallback rate (label provenance): {llm_fallback}/{len(records)} "
+          f"({100 * llm_fallback / len(records):.1f}%)")
+
+    output = {
+        "split": split,
+        "n": len(records),
+        "accuracy": acc,
+        "macro_f1": macro_f1,
+        "per_class": {
+            LABEL_MAP[c]: {"precision": precisions[c], "recall": recalls[c], "f1": per_f1[c]}
+            for c in range(NUM_CLASSES)
+        },
+        "confusion_matrix": confusion,
+        "label_distribution": {str(k): v for k, v in label_dist.items()},
+        "tier_usage": dict(tier_dist),
+        "llm_fallback_rate": llm_fallback / len(records),
+    }
     with open("verifier_eval_results.json", "w") as f:
-        json.dump({
-            "accuracy": acc, "macro_f1": macro_f1,
-            "per_class_f1": {"SUPPORTED": per_f1[0],
-                             "PARTIAL":   per_f1[1],
-                             "UNSUPPORTED": per_f1[2]}
-        }, f, indent=2)
+        json.dump(output, f, indent=2)
+    print("Results saved -> verifier_eval_results.json")
     return macro_f1
 
 
@@ -617,25 +537,27 @@ def evaluate_on_hotpotqa(model, tokenizer, num_samples=500):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["train", "test", "eval"], default="train")
+    parser.add_argument("--data-path", type=str, default=LABELED_DATA_PATH,
+                         help=f"Labeled JSONL from Stage_2_Label_Generator.py (default: {LABELED_DATA_PATH})")
     args = parser.parse_args()
 
     print(f"Device: {DEVICE.upper()}")
 
     if args.mode == "train":
-        if os.path.exists(DATA_PATH):
-            print("Loading cached training data...")
-            with open(DATA_PATH, "rb") as f:
-                data = pickle.load(f)
-        else:
-            data = build_training_data(TRAIN_SAMPLES)
-            with open(DATA_PATH, "wb") as f:
-                pickle.dump(data, f)
+        if not os.path.exists(args.data_path):
+            print(f"Labeled dataset not found: {args.data_path}\n"
+                  f"Run Stage_2_Build_Verifier_Dataset.py then Stage_2_Label_Generator.py "
+                  f"locally, then upload the resulting JSONL here.")
+            return
+
+        # Splits are pre-assigned (by question_id, in Stage_2_Label_Generator.py)
+        # inside the JSONL itself — loaded here, never re-shuffled or re-split.
+        train_data = load_jsonl_dataset(args.data_path, "train")
+        val_data   = load_jsonl_dataset(args.data_path, "val")
 
         tokenizer = DistilBertTokenizerFast.from_pretrained(BERT_MODEL)
-        random.shuffle(data)
-        split      = int(0.9 * len(data))
-        train_ds   = VerifierDataset(data[:split],  tokenizer)
-        val_ds     = VerifierDataset(data[split:],  tokenizer)
+        train_ds  = VerifierDataset(train_data, tokenizer)
+        val_ds    = VerifierDataset(val_data, tokenizer)
 
         train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,
                                   num_workers=2, pin_memory=True)
@@ -657,7 +579,7 @@ def main():
 
     elif args.mode == "eval":
         model, tokenizer = load_verifier(VERIFIER_PATH)
-        evaluate_on_hotpotqa(model, tokenizer, num_samples=500)
+        evaluate_on_labeled_split(model, tokenizer, data_path=args.data_path, split="val")
 
     elif args.mode == "test":
         model, tokenizer = load_verifier(VERIFIER_PATH)

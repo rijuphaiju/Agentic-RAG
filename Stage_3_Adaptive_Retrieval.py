@@ -1013,7 +1013,14 @@ def adaptive_rag_query(query, index, embedder, passages,
     # to escalate back to MULTI_HOP if SIMPLE produces no answer.
     _gate_fired = False
 
-    if query_type == "MULTI_HOP":
+    # Skip escalation gate when ground-truth type is provided by the dataset.
+    # If HotpotQA says "bridge", always use MULTI_HOP — do not downgrade based
+    # on SIMPLE confidence. The gate only applies when the type was guessed by
+    # classify_query() (no override).
+    _type_from_dataset = query_type_override in ("bridge", "comparison",
+                                                  "MULTI_HOP", "COMPARISON", "SIMPLE")
+
+    if query_type == "MULTI_HOP" and not _type_from_dataset:
         simple_budget = _BUDGET.get(("SIMPLE", complexity), _DEFAULT_BUDGET["SIMPLE"])
         simple_pool   = retrieve_simple(query, index, embedder, passages,
                                         top_k=simple_budget["top_k"])
