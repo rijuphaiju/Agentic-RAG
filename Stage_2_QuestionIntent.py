@@ -48,7 +48,11 @@ _WH_TYPE_RULES = (
      r"(?:title|name|called)\b", "TITLE"),
     (r"\bwhat\s+event\b|\bwhich\s+event\b", "EVENT"),
     (r"\bwhat\s+are\b|\bwhich\s+are\b|\bname\s+all\b|\blist\s+the\b", "LIST"),
-    (r"\bwhen\b|\bwhat\s+date\b", "DATE"),
+    (r"\bwhen\b|\bwhat\s+date\b|\bwhat\s+time\s*frame\b|\bwhat\s+time\s+period\b", "DATE"),
+)
+
+_LEADING_WH_RE = re.compile(
+    r"^\s*(what|which|who|whom|whose|where|when|how)\b", re.IGNORECASE
 )
 
 _FOCUS_RE = re.compile(
@@ -82,18 +86,29 @@ def _detect_type(question: str, comparison: bool) -> str:
     if comparison:
         return "COMPARISON"
     q_lower = question.lower()
-    # Prefer whichever wh-pattern matches EARLIEST in the question, not the
-    # first rule in priority order — HotpotQA bridge questions often embed a
-    # second "who"/"which" inside a relative clause well after the real
-    # question word ("What government position was held by the woman WHO
-    # portrayed..."), and that trailing one must not win.
-    best_pos, best_type = None, None
+    stripped = question.strip()
+
+    matches = []
     for pattern, etype in _WH_TYPE_RULES:
         m = re.search(pattern, q_lower)
-        if m and (best_pos is None or m.start() < best_pos):
-            best_pos, best_type = m.start(), etype
-    if best_type is not None:
-        return best_type
+        if m:
+            matches.append((m.start(), etype))
+
+    if matches:
+        if _LEADING_WH_RE.match(stripped):
+            # The question itself opens with a wh-word ("What year was...") —
+            # that's the real question word, so the earliest match wins, same
+            # as before.
+            matches.sort(key=lambda item: item[0])
+        else:
+            # The question does NOT open with a wh-word — the opening
+            # content is very likely a relative clause embedding an
+            # unrelated wh-word ("The arena WHERE the Maineiacs played...
+            # can seat HOW MANY people?"), not the actual question focus.
+            # HotpotQA phrasings overwhelmingly put the real question word
+            # last, right before the "?", so prefer the LATEST match here.
+            matches.sort(key=lambda item: -item[0])
+        return matches[0][1]
     if _LEADING_AUX_RE.match(question.strip()):
         return "BOOLEAN"
     return "UNKNOWN"

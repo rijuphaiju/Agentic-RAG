@@ -59,6 +59,34 @@ _STOPWORDS_LEADING = {
     "They", "We", "You", "His", "Her", "Their", "In", "On", "At", "Final", "Answer",
 }
 
+# A naive split on ". " breaks mid-sentence at abbreviations ("K. A.
+# Applegate") — merge any split that landed right after a known
+# abbreviation or single-letter initial rather than a real sentence boundary.
+_ABBREVIATIONS = {
+    "dr", "mr", "mrs", "ms", "jr", "sr", "st", "vs", "prof", "rev", "gen",
+    "sen", "rep", "gov", "lt", "col", "capt", "sgt", "mt", "no", "vol", "etc",
+}
+
+
+def _ends_with_abbreviation(sentence: str) -> bool:
+    words = sentence.split()
+    if not words:
+        return False
+    last = words[-1].rstrip(".")
+    if last.lower() in _ABBREVIATIONS:
+        return True
+    return len(last) == 1 and last.isupper()
+
+
+def _split_sentences(text: str) -> List[str]:
+    sentences: List[str] = []
+    for part in _SENTENCE_SPLIT_RE.split(text):
+        if sentences and _ends_with_abbreviation(sentences[-1]):
+            sentences[-1] = f"{sentences[-1]} {part}"
+        else:
+            sentences.append(part)
+    return sentences
+
 _ORG_SUFFIXES = (
     "University", "College", "Company", "Corporation", "Inc", "Ltd",
     "Party", "Organization", "Institute", "Association", "Church",
@@ -78,7 +106,7 @@ def extract_entities(text: str) -> List[str]:
     Runs per-sentence so a span never merges the end of one sentence with
     the start of the next."""
     found: List[str] = []
-    for sentence in _SENTENCE_SPLIT_RE.split(text):
+    for sentence in _split_sentences(text):
         for m in _ENTITY_RE.finditer(sentence):
             span = m.group(0).strip().rstrip(".")
             words = span.split()
@@ -117,6 +145,29 @@ def classify_entity(entity: str) -> str:
     if len(entity.split()) == 2:
         return "person"
     return "other"
+
+
+# Demonyms/nationality adjectives ("South Korean", "American") match the
+# capitalized-span entity regex but aren't a genuine second comparison
+# subject — confirmed to cause a real bug: a claim like "YG Entertainment
+# formed the South Korean boy group WINNER" was treated as naming 3 distinct
+# entities, triggering a search for a passage "about" South Korean-ness,
+# which pulled in an unrelated South Korean group's passage and made the
+# whole premise read as contradicting the real claim.
+_DEMONYMS = {
+    "south korean", "north korean", "korean", "american", "british", "english",
+    "scottish", "irish", "french", "german", "italian", "spanish", "russian",
+    "chinese", "japanese", "indian", "australian", "canadian", "mexican",
+    "brazilian", "dutch", "swedish", "norwegian", "danish", "egyptian",
+    "turkish", "greek", "polish", "portuguese", "vietnamese", "thai",
+}
+
+
+def is_comparable_entity(entity: str) -> bool:
+    """True for entities worth fetching their own dedicated evidence
+    passage for (a second comparison subject) — excludes bare demonyms/
+    nationality adjectives, which are not a genuine second subject."""
+    return entity.lower() not in _DEMONYMS
 
 
 # ─────────────────────────────────────────────

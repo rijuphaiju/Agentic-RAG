@@ -18,8 +18,9 @@ has no import-time dependency on Stage 1's internal state.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sentence_transformers import CrossEncoder
 
@@ -27,6 +28,41 @@ from Stage_1_RAG_Pipeline import RERANKER_MODEL
 
 MIN_RELEVANCE_SCORE = 0.0   # ms-marco cross-encoder logits: >0 ~ topically relevant
 DEFAULT_TOP_K = 2
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+MIN_SENTENCES_FOR_REFINEMENT = 3  # passages this short are left whole
+
+# A naive split on ". " breaks mid-sentence at abbreviations ("Dr. Robotnik",
+# "K. A. Applegate") — confirmed to produce a genuinely garbled, subject-less
+# fragment ("Robotnik from "Sonic the Hedgehog", and Pete.") that an NLI
+# model then correctly refuses to entail, since it isn't a real sentence.
+_ABBREVIATIONS = {
+    "dr", "mr", "mrs", "ms", "jr", "sr", "st", "vs", "prof", "rev", "gen",
+    "sen", "rep", "gov", "lt", "col", "capt", "sgt", "mt", "no", "vol", "etc",
+}
+
+
+def _ends_with_abbreviation(sentence: str) -> bool:
+    words = sentence.split()
+    if not words:
+        return False
+    last = words[-1].rstrip(".")
+    if last.lower() in _ABBREVIATIONS:
+        return True
+    return len(last) == 1 and last.isupper()  # a lone initial, e.g. "K." in "K. A. Applegate"
+
+
+def _split_sentences(text: str) -> List[str]:
+    """Sentence-splits `text`, re-merging any split that landed right after
+    a known abbreviation or a single-letter initial rather than a real
+    sentence boundary."""
+    sentences: List[str] = []
+    for part in _SENTENCE_SPLIT_RE.split(text):
+        if sentences and _ends_with_abbreviation(sentences[-1]):
+            sentences[-1] = f"{sentences[-1]} {part}"
+        else:
+            sentences.append(part)
+    return sentences
 
 _matcher: Optional[CrossEncoder] = None
 
@@ -91,3 +127,70 @@ def match_evidence_batch(
             for p, s in ranked[:top_k]
         ])
     return results
+
+
+def best_sentence(claim_text: str, passage_text: str, matcher: Optional[CrossEncoder] = None) -> str:
+    """Refines a whole passage down to its single best-matching sentence for
+    a given claim. A terse claim ("Animorphs") checked against a full
+    multi-sentence passage can flip an NLI model from ENTAILED to
+    CONTRADICTED once an unrelated later sentence is in the same premise —
+    confirmed empirically (a passage opening "Animorphs is a science
+    fantasy series..." followed by unrelated thematic sentences scored
+    CONTRADICTED as a whole passage, ENTAILED as just its first sentence).
+    Short passages are returned unchanged — there's nothing to gain by
+    splitting a passage that's already close to one sentence.
+    """
+    sentences = [s.strip() for s in _split_sentences(passage_text) if s.strip()]
+    if len(sentences) < MIN_SENTENCES_FOR_REFINEMENT:
+        return passage_text
+    model = matcher or _get_matcher()
+    pairs = [(claim_text, s) for s in sentences]
+    scores = model.predict(pairs)
+    return max(zip(sentences, scores), key=lambda x: x[1])[0]
+
+
+def build_premise(
+    claim_text: str,
+    entities: List[str],
+    passages: List[Dict[str, Any]],
+    top_k_evidence: int = DEFAULT_TOP_K,
+    matcher: Optional[CrossEncoder] = None,
+) -> Tuple[str, List[EvidenceMatch]]:
+    """
+    Constructs the NLI premise for one claim, returning (premise_text,
+    evidence_matches) — evidence_matches is the ranked EvidenceMatch list
+    used for best_evidence/evidence_score reporting.
+
+    A claim naming >=2 distinct entities (e.g. a comparison — "Giuseppe
+    Verdi and Ambroise Thomas are both Opera composers") needs facts about
+    BOTH entities in the same premise: the single best-matching passage
+    usually only discusses one of them, and a single-premise NLI model
+    can't perform the missing cross-passage comparison — confirmed
+    empirically (NEUTRAL when given only the Verdi passage, ENTAILED once
+    the Ambroise Thomas passage was concatenated in). For a single-entity
+    (or entity-free) claim, this reduces to the original "best passage,
+    refined to its best sentence" behavior.
+    """
+    model = matcher or _get_matcher()
+    ranked = match_evidence(claim_text, passages, top_k=max(top_k_evidence, len(entities) or 1), matcher=model)
+    if not ranked:
+        return "", []
+
+    if len(entities) < 2:
+        premise = best_sentence(claim_text, ranked[0].text, matcher=model)
+        return premise, ranked
+
+    segments: List[str] = []
+    seen_titles = set()
+    for entity in entities:
+        entity_matches = match_evidence(entity, passages, top_k=1, matcher=model)
+        if not entity_matches or entity_matches[0].title in seen_titles:
+            continue
+        seen_titles.add(entity_matches[0].title)
+        segments.append(best_sentence(claim_text, entity_matches[0].text, matcher=model))
+
+    if not segments:
+        premise = best_sentence(claim_text, ranked[0].text, matcher=model)
+        return premise, ranked
+
+    return " ".join(segments), ranked

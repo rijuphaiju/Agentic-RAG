@@ -33,8 +33,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from Stage_2_Aggregator import aggregate, build_claim_verifications
-from Stage_2_ClaimExtractor import extract_claims
-from Stage_2_EvidenceMatcher import DEFAULT_TOP_K, match_evidence_batch
+from Stage_2_ClaimExtractor import extract_claims, extract_entities, is_comparable_entity
+from Stage_2_EvidenceMatcher import DEFAULT_TOP_K, build_premise
 from Stage_2_NLIVerifier import NLIVerifier, load_nli_verifier  # re-exported
 
 __all__ = [
@@ -71,9 +71,30 @@ def verify(
     claims = extract_claims(generated_answer, question=question)
     claim_texts = [c.text for c in claims]
 
-    evidence_matches = match_evidence_batch(claim_texts, passages, top_k=top_k_evidence)
+    # Premise construction per claim (not a single shared batch): a claim
+    # naming >=2 distinct entities (typically a comparison) gets the best
+    # passage PER entity concatenated, since a single best-matching passage
+    # usually only covers one side and a single-premise NLI model can't
+    # perform the missing cross-passage comparison on its own — confirmed
+    # empirically (NEUTRAL on one entity's passage alone, ENTAILED once both
+    # entities' passages were combined). A single-entity claim additionally
+    # gets refined down to its best-matching SENTENCE rather than the whole
+    # passage — a terse claim ("Animorphs") checked against a full
+    # multi-sentence passage can flip an NLI model to CONTRADICTED once an
+    # unrelated later sentence is in the same premise; the single sentence
+    # that actually supports the claim does not have that problem.
+    premises, evidence_matches = [], []
+    for claim_text in claim_texts:
+        # Bare demonyms/nationality adjectives ("South Korean") match the
+        # entity regex but aren't a genuine second comparison subject —
+        # counting them would wrongly trigger multi-passage gathering for
+        # plain subject-verb-object claims and can pull in an unrelated
+        # passage that merely shares the same nationality.
+        entities = [e for e in extract_entities(claim_text) if is_comparable_entity(e)]
+        premise, matches = build_premise(claim_text, entities, passages, top_k_evidence=top_k_evidence)
+        premises.append(premise)
+        evidence_matches.append(matches)
 
-    premises = [matches[0].text if matches else "" for matches in evidence_matches]
     nli_pairs = list(zip(premises, claim_texts))
     nli_results = nli_verifier.score_batch(nli_pairs)
 
