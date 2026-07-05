@@ -44,15 +44,14 @@ import re
 import sys
 from collections import Counter, defaultdict
 
-import torch
-from datasets import load_dataset, concatenate_datasets
-from tqdm import tqdm
-
 try:
     sys.stdout.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
+# Stage_1_RAG_Pipeline (and its faiss/datasets imports) must load before
+# torch — importing torch first triggers a Windows OpenMP runtime conflict
+# between torch and faiss/datasets that segfaults the process.
 # ── Stage 1 helpers ──
 from Stage_1_RAG_Pipeline import (
     build_example_corpus,
@@ -66,6 +65,10 @@ from Stage_1_RAG_Pipeline import (
     EMBED_MODEL,
     RERANK_POOL,
 )
+
+import torch
+from datasets import load_dataset, concatenate_datasets
+from tqdm import tqdm
 
 # ── Stage 2 verifier (V2: evidence-grounded self-verification) ──
 # Native interface — verify(question, answer, passages, nli_verifier) —

@@ -11,6 +11,10 @@ verifier_model_v1.pt
 *.pkl
 *.bin
 *.pt
+*.safetensors
+models/
+verifier_dataset.jsonl
+verifier_dataset_labeled.jsonl
 
 # Python
 __pycache__/

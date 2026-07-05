@@ -6,6 +6,8 @@ torch>=2.0.0
 sentence-transformers>=2.7.0
 transformers>=4.40.0
 datasets>=2.19.0
+accelerate>=0.30.0      # required by transformers.Trainer (Stage_2_Verifier_Train.py)
+peft>=0.10.0            # LoRA fine-tuning, needed to fit optimizer state in <8GB VRAM (Stage_2_Verifier_Train.py)
 
 # Vector search
 faiss-cpu>=1.8.0        # use faiss-gpu if you have CUDA GPU

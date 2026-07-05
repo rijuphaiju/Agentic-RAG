@@ -31,13 +31,13 @@ try:
 except Exception:
     pass
 
+from datasets import load_dataset
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 import uvicorn
-
-from datasets import load_dataset
 
 from Stage_1_RAG_Pipeline import (
     build_example_corpus,
